@@ -15,7 +15,8 @@ def _run(connection) -> None:
     context.configure(
         connection=connection,
         target_metadata=Base.metadata,
-        render_as_batch=True,
+        # No batch mode: rebuilding a table drops the FTS triggers attached to it.
+        render_as_batch=False,
         include_name=_include_name,
     )
     with context.begin_transaction():

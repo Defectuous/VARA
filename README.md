@@ -38,6 +38,7 @@ Settings come from `VARA_*` environment variables or a local `.env` file (never 
 | `VARA_PORT` | `8000` | |
 | `VARA_LOG_LEVEL` | `INFO` | |
 | `VARA_DATA_DIR` | `data` | Holds `vara.db` and `backups/`; ignored by Git |
+| `VARA_RETENTION_ON_STARTUP` | `true` | Apply retention rules each time the server starts |
 | `VARA_PRIVACY_MODE` | `local_only` | `local_only` blocks all cloud calls; `ask` needs `confirm_cloud: true` per request; `allowed` permits them |
 | `VARA_OLLAMA_URL` | `http://127.0.0.1:11434` | |
 | `VARA_OLLAMA_MODEL` | `llama3.1:8b` | |
@@ -88,8 +89,9 @@ prompt. Memories marked `proposed` are never used until you confirm them.
 | Endpoint | What it does |
 | --- | --- |
 | `GET /v1/memories?status=` | List memories, optionally only `confirmed` or `proposed` |
-| `POST /v1/memories` | Add one: `content`, optional `status` and `source_message_id` (provenance) |
-| `PATCH /v1/memories/{id}` | Correct `content`, or approve with `status: "confirmed"` |
+| `POST /v1/memories` | Add one: `content`, optional `category`, `status`, `pinned`, and `source_message_id` (provenance) |
+| `PATCH /v1/memories/{id}` | Correct `content` or `category`, approve with `status: "confirmed"`, or set `pinned` |
+| `POST /v1/conversations/{id}/suggest-memories` | A model proposes facts from your messages in that conversation (see below) |
 | `DELETE /v1/memories/{id}` | Delete it, including from the search index |
 | `GET /v1/conversations`, `GET /v1/conversations/{id}` | List conversations, or one with its messages |
 | `PATCH` / `DELETE /v1/conversations/{id}` | Rename, or delete with all its messages |
@@ -98,6 +100,34 @@ prompt. Memories marked `proposed` are never used until you confirm them.
 | `GET /v1/export` | Everything as one JSON document |
 
 Deleted text is overwritten in the database file, not just hidden.
+
+### Suggested memories
+
+`suggest-memories` sends only your own messages from one conversation to a model, routed under the privacy
+mode like chat (optional `provider`, `model`, `confirm_cloud`). Each suggested fact gets a category and a link
+to the message it came from, and is saved as `proposed`. Suggestions are dropped if they look like a
+credential, share no meaningful word with what you wrote (which catches invented facts), or duplicate an
+existing memory. Approve a suggestion with `PATCH /v1/memories/{id}` and `status: "confirmed"`.
+
+Categories: `identity`, `preference`, `relationship`, `location`, `work`, `health`, `finance`, `commitment`,
+and `other`.
+
+### Retention
+
+There is one rule for each kind of data. `keep_days: null` means keep until you delete it.
+
+| Rule | Default |
+| --- | --- |
+| `conversations` | Keep (counted from the last message) |
+| `proposed` (unapproved suggestions) | 30 days |
+| Every memory category, `commitment` included | Keep |
+
+`GET /v1/retention` lists every rule with how much you have saved of each kind, the categories you use most
+first, and flags `health` and `finance` as sensitive. Change a rule with `PUT /v1/retention/{key}` and
+`{"keep_days": 90}` or `{"keep_days": null}`. A **pinned** memory is never deleted by any rule, so you can keep
+particular items when a category has a time limit. `GET /v1/retention/due` shows what the current rules would
+delete, so you can pin items first. Rules are applied when the server starts (`VARA_RETENTION_ON_STARTUP=false`
+turns that off) and by `POST /v1/retention/apply`.
 
 ## Backups
 

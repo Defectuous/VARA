@@ -56,6 +56,20 @@ class MemorySource(StrEnum):
     CONVERSATION = "conversation"
 
 
+class MemoryCategory(StrEnum):
+    """The kind of information a memory holds; retention rules are set per category."""
+
+    IDENTITY = "identity"
+    PREFERENCE = "preference"
+    RELATIONSHIP = "relationship"
+    LOCATION = "location"
+    WORK = "work"
+    HEALTH = "health"
+    FINANCE = "finance"
+    COMMITMENT = "commitment"
+    OTHER = "other"
+
+
 class Memory(Base):
     """An explicit fact about the user, kept separate from conversation history."""
 
@@ -63,10 +77,23 @@ class Memory(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     content: Mapped[str] = mapped_column(Text)
+    category: Mapped[MemoryCategory] = mapped_column(String(30), default=MemoryCategory.OTHER)
+    pinned: Mapped[bool] = mapped_column(default=False)  # exempt from every retention rule
     status: Mapped[MemoryStatus] = mapped_column(String(20), default=MemoryStatus.CONFIRMED)
     source: Mapped[MemorySource] = mapped_column(String(20), default=MemorySource.USER)
     source_message_id: Mapped[int | None] = mapped_column(
         ForeignKey("messages.id", ondelete="SET NULL")
     )
     created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+
+
+class RetentionRule(Base):
+    """How long to keep one kind of data. Keys: a MemoryCategory, "conversations", or
+    "proposed" (unapproved suggestions). keep_days None means keep until deleted."""
+
+    __tablename__ = "retention_rules"
+
+    key: Mapped[str] = mapped_column(String(30), primary_key=True)
+    keep_days: Mapped[int | None]
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)

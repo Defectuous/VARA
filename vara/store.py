@@ -4,7 +4,7 @@ from collections.abc import Sequence
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
 
-from vara.db.models import Conversation, Memory, MemoryStatus, StoredMessage
+from vara.db.models import Conversation, Memory, MemoryStatus, RetentionRule, StoredMessage
 from vara.providers.base import Message
 
 _WORD = re.compile(r"\w+", re.UNICODE)
@@ -15,12 +15,18 @@ _STOPWORDS = frozenset(
 )
 
 
+def keywords(text_: str) -> list[str]:
+    """Distinct meaningful lowercase words, in order of appearance."""
+    words = _WORD.findall(text_.lower())
+    return list(dict.fromkeys(w for w in words if len(w) > 2 and w not in _STOPWORDS))
+
+
 def fts_query(text_: str) -> str | None:
     """Turn free text into a safe FTS5 query: distinct meaningful words, ORed and quoted."""
-    terms = [w for w in _WORD.findall(text_.lower()) if len(w) > 2 and w not in _STOPWORDS]
+    terms = keywords(text_)
     if not terms:
         return None
-    return " OR ".join(f'"{term}"' for term in dict.fromkeys(terms))
+    return " OR ".join(f'"{term}"' for term in terms)
 
 
 def title_from(text_: str) -> str:
@@ -146,7 +152,9 @@ def memory_dict(m: Memory) -> dict:
     return {
         "id": m.id,
         "content": m.content,
+        "category": m.category,
         "status": m.status,
+        "pinned": m.pinned,
         "source": m.source,
         "source_message_id": m.source_message_id,
         "created_at": m.created_at.isoformat(),
@@ -174,4 +182,8 @@ def export_all(session: Session) -> dict:
         "version": 1,
         "conversations": [conversation_dict(c, with_messages=True) for c in conversations],
         "memories": [memory_dict(m) for m in memories],
+        "retention_rules": {
+            r.key: r.keep_days
+            for r in session.scalars(select(RetentionRule).order_by(RetentionRule.key))
+        },
     }

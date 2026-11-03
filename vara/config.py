@@ -26,6 +26,7 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
     data_dir: Path = Path("data")
+    retention_on_startup: bool = True  # apply retention rules each time the server starts
 
     privacy_mode: PrivacyMode = PrivacyMode.LOCAL_ONLY
     ollama_url: str = "http://127.0.0.1:11434"

@@ -1,5 +1,8 @@
+import logging
+
 from fastapi import FastAPI
 
+from vara import retention
 from vara.api import health, v1
 from vara.config import Settings, get_settings
 from vara.credentials import get_api_key
@@ -37,6 +40,11 @@ def create_app(settings: Settings | None = None, router: ModelRouter | None = No
     )
     db = Database(settings.database_path)
     db.upgrade()
+    if settings.retention_on_startup:
+        with db.session() as session:
+            deleted = retention.apply(session)
+        if any(deleted.values()):
+            logging.getLogger("vara").info("Retention rules deleted %s", deleted)
     app.state.settings = settings
     app.state.db = db
     app.state.router = router or build_router(settings)

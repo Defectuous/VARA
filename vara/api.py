@@ -81,7 +81,7 @@ def _db(request: Request) -> Database:
     return request.app.state.db
 
 
-def _http_error(exc: Exception) -> HTTPException:
+def http_error(exc: Exception) -> HTTPException:
     if isinstance(exc, PrivacyBlocked):
         return HTTPException(403, str(exc))
     if isinstance(exc, ConfirmationRequired):
@@ -91,7 +91,7 @@ def _http_error(exc: Exception) -> HTTPException:
     return HTTPException(502, str(exc))
 
 
-_ROUTING_ERRORS = (PrivacyBlocked, ConfirmationRequired, NoProviderAvailable, ProviderError)
+ROUTING_ERRORS = (PrivacyBlocked, ConfirmationRequired, NoProviderAvailable, ProviderError)
 
 
 @dataclass
@@ -153,8 +153,8 @@ async def _open_stream(request: Request, prepared: _Prepared) -> AsyncIterator[R
     )
     try:
         first = await anext(events)
-    except _ROUTING_ERRORS as exc:
-        raise _http_error(exc) from exc
+    except ROUTING_ERRORS as exc:
+        raise http_error(exc) from exc
 
     async def chained() -> AsyncIterator[RoutedEvent]:
         yield first
@@ -206,8 +206,8 @@ def chat_preview(body: ChatRequest, request: Request) -> dict:
             system=prepared.system,
             cloud_confirmed=body.confirm_cloud,
         )
-    except _ROUTING_ERRORS as exc:
-        raise _http_error(exc) from exc
+    except ROUTING_ERRORS as exc:
+        raise http_error(exc) from exc
     return {
         "privacy_mode": router.privacy_mode,
         "memories_used": prepared.memories_used,
@@ -226,8 +226,8 @@ async def chat(body: ChatRequest, request: Request) -> ChatResponse:
                 parts.append(routed.event.text)
             else:
                 summary = _summary(routed, routed.event)
-    except _ROUTING_ERRORS as exc:
-        raise _http_error(exc) from exc
+    except ROUTING_ERRORS as exc:
+        raise http_error(exc) from exc
 
     if summary is None:
         raise HTTPException(502, "The provider ended without completing")
@@ -260,7 +260,7 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
                         request, prepared, "".join(parts), _summary(routed, routed.event)
                     )
                     yield _sse("done", saved)
-        except _ROUTING_ERRORS as exc:
+        except ROUTING_ERRORS as exc:
             yield _sse("error", {"message": str(exc)})
         except HTTPException as exc:
             yield _sse("error", {"message": str(exc.detail)})
