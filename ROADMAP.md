@@ -45,7 +45,7 @@ The roadmap is intentionally staged. Build a trustworthy local foundation first,
 
 ### 1. Build a small, secure local backend
 
-**Status:** Started. The FastAPI app, `/health` endpoint, first test, and localhost-only run command exist.
+**Status:** Done. Settings with a development/production split, JSON logs with secret redaction, the `/v1` API prefix, a localhost-only `uv run python -m vara` command, and tests for each exist. Device authentication moves to Phase 6.
 
 **Work:** Add configuration (with a development/production split), structured logs that redact secrets, and a versioned API (`/v1/...`). Bind to localhost by default. Add authentication before allowing other devices to connect.
 
@@ -161,7 +161,7 @@ For local models, benchmark a quantized 7B/8B model on the RTX 5060; its 8 GB VR
 
 ## Next Implementation Session
 
-Finish Phase 1: add configuration, structured redacted logging, the `/v1` API prefix, and tests for each. Then start Phase 2 with the provider interface, a fake provider for tests, and the Ollama adapter. Add cloud adapters only after the privacy-mode check is in place and tested.
+Start Phase 2: the provider interface, a fake provider for tests, the privacy-mode check, and the Ollama adapter. Add cloud adapters (Anthropic first; its key is already in Credential Manager) only after the privacy-mode check is in place and tested.
 
 ## Decisions to Confirm Before Model and Device Work
 
