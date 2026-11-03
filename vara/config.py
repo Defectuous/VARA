@@ -3,6 +3,8 @@ from functools import lru_cache
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from vara.router import PrivacyMode
+
 
 class Environment(StrEnum):
     DEVELOPMENT = "development"
@@ -21,6 +23,12 @@ class Settings(BaseSettings):
     host: str = "127.0.0.1"
     port: int = 8000
     log_level: str = "INFO"
+
+    privacy_mode: PrivacyMode = PrivacyMode.LOCAL_ONLY
+    ollama_url: str = "http://127.0.0.1:11434"
+    ollama_model: str = "llama3.1:8b"
+    anthropic_model: str = "claude-opus-5-5"
+    anthropic_effort: str = "medium"
 
     @property
     def is_production(self) -> bool:

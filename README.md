@@ -37,6 +37,11 @@ Settings come from `VARA_*` environment variables or a local `.env` file (never 
 | `VARA_HOST` | `127.0.0.1` | Anything other than localhost logs a warning |
 | `VARA_PORT` | `8000` | |
 | `VARA_LOG_LEVEL` | `INFO` | |
+| `VARA_PRIVACY_MODE` | `local_only` | `local_only` blocks all cloud calls; `ask` needs `confirm_cloud: true` per request; `allowed` permits them |
+| `VARA_OLLAMA_URL` | `http://127.0.0.1:11434` | |
+| `VARA_OLLAMA_MODEL` | `llama3.1:8b` | |
+| `VARA_ANTHROPIC_MODEL` | `claude-opus-5-5` | |
+| `VARA_ANTHROPIC_EFFORT` | `medium` | `low`, `medium`, `high`, `xhigh`, or `max` |
 
 Logs are JSON lines, with API keys, bearer tokens, and password/secret fields redacted.
 
@@ -45,5 +50,18 @@ API keys are not configuration. Store them in Windows Credential Manager under t
 ```powershell
 uv run --with keyring python -c "import keyring, getpass; keyring.set_password('vara', 'anthropic', getpass.getpass('Key: '))"
 ```
+
+A cloud provider is enabled only when its key is present. Check with `GET /v1/providers`.
+
+## Chat
+
+```powershell
+$body = @{ messages = @(@{ role = "user"; content = "Hello" }) } | ConvertTo-Json -Depth 3
+Invoke-RestMethod http://127.0.0.1:8000/v1/chat -Method Post -ContentType application/json -Body $body
+```
+
+Optional fields: `provider` (for example `"anthropic"`; a manual choice never falls back), `model`, `system`,
+and `confirm_cloud` (required in `ask` mode). Without a provider, local models are tried before cloud ones.
+The response names the provider and model that answered, with token usage.
 
 Keep the service bound to localhost until device authentication is implemented.

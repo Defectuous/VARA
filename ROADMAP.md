@@ -55,6 +55,8 @@ The roadmap is intentionally staged. Build a trustworthy local foundation first,
 
 ### 2. Add local and cloud model providers
 
+**Status:** Started. The provider interface, the fake provider, the privacy-mode router (tested), the Ollama and Anthropic adapters, and `/v1/chat` and `/v1/providers` exist. Claude has answered a live request. Remaining: OpenAI, Gemini, Groq, and OpenRouter adapters; cost tracking; context inspection; a streaming endpoint; Ollama install and benchmark.
+
 **Work:** Define a model-provider interface that supports streaming text, tool-call requests, and capability flags (context length, vision, tool use, local or cloud). Implement Ollama first. Then add adapters for Anthropic Claude, OpenAI, Google Gemini, Groq, and OpenRouter using their official SDKs or HTTP APIs. Enforce the privacy mode in the provider layer itself, so a cloud call cannot bypass it. Store API keys in the operating system's credential store, never in config files or the database. Add a simple router: a manual model choice always wins; otherwise pick by rules (task type, privacy mode, required capabilities, and availability) and fall back to the next provider when one fails. Show which model answered each message. Add timeouts, clear errors, token and cost tracking for cloud providers, and a way to inspect exactly what context is being sent.
 
 For local models, benchmark a quantized 7B/8B model on the RTX 5060; its 8 GB VRAM is shared with display workloads, so measure actual free memory and speed. Repeat the benchmark on the V100 once it is active. Try a 12B/14B model only if VRAM, context length, and speed are acceptable.
@@ -161,7 +163,7 @@ For local models, benchmark a quantized 7B/8B model on the RTX 5060; its 8 GB VR
 
 ## Next Implementation Session
 
-Start Phase 2: the provider interface, a fake provider for tests, the privacy-mode check, and the Ollama adapter. Add cloud adapters (Anthropic first; its key is already in Credential Manager) only after the privacy-mode check is in place and tested.
+Continue Phase 2: install Ollama and run the RTX 5060 benchmark; add the OpenAI adapter (and Groq or xAI once it is clear which key is which); add per-request cost tracking and a way to inspect the context sent.
 
 ## Decisions to Confirm Before Model and Device Work
 

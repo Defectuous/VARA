@@ -2,9 +2,28 @@ from fastapi import FastAPI
 
 from vara.api import health, v1
 from vara.config import Settings, get_settings
+from vara.credentials import get_api_key
+from vara.providers.anthropic import AnthropicProvider
+from vara.providers.base import ModelProvider
+from vara.providers.ollama import OllamaProvider
+from vara.router import ModelRouter
 
 
-def create_app(settings: Settings | None = None) -> FastAPI:
+def build_router(settings: Settings) -> ModelRouter:
+    providers: list[ModelProvider] = [
+        OllamaProvider(base_url=settings.ollama_url, default_model=settings.ollama_model)
+    ]
+    # Cloud providers are registered only when their key is in the credential store.
+    if key := get_api_key("anthropic"):
+        providers.append(
+            AnthropicProvider(
+                key, default_model=settings.anthropic_model, effort=settings.anthropic_effort
+            )
+        )
+    return ModelRouter(providers, settings.privacy_mode)
+
+
+def create_app(settings: Settings | None = None, router: ModelRouter | None = None) -> FastAPI:
     settings = settings or get_settings()
     app = FastAPI(
         title="V.A.R.A. API",
@@ -15,6 +34,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url=None if settings.is_production else "/openapi.json",
     )
     app.state.settings = settings
+    app.state.router = router or build_router(settings)
     # Unversioned liveness check for scripts and service managers.
     app.add_api_route("/health", health, methods=["GET"])
     app.include_router(v1)
