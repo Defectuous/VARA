@@ -69,6 +69,23 @@ For local models, benchmark a quantized 7B/8B model on the RTX 5060; its 8 GB VR
 
 ### 3. Build durable, user-controlled memory
 
+**Status:** Started. Done so far:
+
+- SQLite storage with SQLAlchemy and Alembic migrations, applied automatically on startup.
+- Stored conversations; stored usage that survives restarts.
+- Separate memories with provenance and a confirmed/proposed status.
+- FTS5 search over messages and memories.
+- Each request retrieves the most relevant confirmed memories and the reply lists which were used.
+- Correcting and deleting memories; deleting conversations. Deleted text is overwritten, which a test checks.
+- JSON export, and `backup` and `restore` commands. A backup has been restored to a test copy.
+
+Remaining:
+
+- Written rules for what is retained.
+- Having a model propose memories from conversations, for you to approve.
+- A regular backup schedule, and a recovery path for encryption keys.
+- An upgrade test that migrates a database from an earlier schema version.
+
 **Work:** Store conversations and explicit user facts separately. Add searchable history, timestamps, source/provenance, correction and deletion flows, and clear rules for what is retained. Retrieve relevant memory per request instead of sending everything every time, and show which memories were used. Never treat a model's guess as a confirmed fact: proposed memories need your approval, or are marked unconfirmed until you approve them.
 
 **Tools:** SQLite for the initial single-PC database; SQLAlchemy and Alembic for data access and schema migrations; SQLite FTS5 for full-text search. Protect the PC and backups with encryption.
@@ -165,7 +182,7 @@ For local models, benchmark a quantized 7B/8B model on the RTX 5060; its 8 GB VR
 
 ## Next Implementation Session
 
-Finish Phase 2: add the OpenAI adapter (and Groq or xAI once it is clear which key is which) and prices for its models. Then start Phase 3: SQLite with SQLAlchemy and Alembic, storing conversations and usage.
+Finish Phase 3: model-proposed memories (suggested after a conversation, saved as `proposed`), a retention policy, and a scheduled backup through Windows Task Scheduler. Add the OpenAI adapter once its key is in Credential Manager (and Groq or xAI once it is clear which key is which).
 
 ## Decisions to Confirm Before Model and Device Work
 

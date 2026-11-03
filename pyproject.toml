@@ -5,11 +5,13 @@ description = "Visual and Audio Reality Assistant backend"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "alembic>=1.14,<2.0",
     "anthropic>=1.0,<2.0",
     "fastapi>=0.115,<1.0",
     "httpx>=0.28,<1.0",
     "keyring>=25,<26",
     "pydantic-settings>=2.6,<3.0",
+    "sqlalchemy>=2.0,<3.0",
     "uvicorn[standard]>=0.34,<1.0",
 ]
 

@@ -1,5 +1,6 @@
 from enum import StrEnum
 from functools import lru_cache
+from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -24,11 +25,17 @@ class Settings(BaseSettings):
     port: int = 8000
     log_level: str = "INFO"
 
+    data_dir: Path = Path("data")
+
     privacy_mode: PrivacyMode = PrivacyMode.LOCAL_ONLY
     ollama_url: str = "http://127.0.0.1:11434"
     ollama_model: str = "llama3.1:8b"
     anthropic_model: str = "claude-opus-5-5"
     anthropic_effort: str = "medium"
+
+    @property
+    def database_path(self) -> Path:
+        return self.data_dir / "vara.db"
 
     @property
     def is_production(self) -> bool:

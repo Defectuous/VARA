@@ -21,12 +21,15 @@ def test_chat_returns_answer_and_which_model_answered() -> None:
 
     assert response.status_code == 200
     assert response.json() == {
+        "conversation_id": 1,
+        "message_id": 2,
         "provider": "local",
         "model": "local-model",
         "text": "echo: hello ",
         "stop_reason": "end_turn",
         "usage": {"input_tokens": None, "output_tokens": None},
         "cost_usd": 0.0,
+        "memories_used": [],
     }
 
 
@@ -134,7 +137,7 @@ def test_usage_totals_accumulate_cost_for_priced_cloud_models() -> None:
 
     assert first["cost_usd"] == 6.0  # $4 input + $2 output
     assert usage["total_cost_usd"] == 12.0
-    assert usage["since_start"] == [
+    assert usage["totals"] == [
         {
             "provider": "anthropic",
             "model": "claude-opus-5-5",
@@ -153,4 +156,4 @@ def test_unknown_cloud_model_cost_is_none() -> None:
     )
 
     assert client.post("/v1/chat", json=HELLO).json()["cost_usd"] is None
-    assert client.get("/v1/usage").json()["since_start"][0]["unpriced_requests"] == 1
+    assert client.get("/v1/usage").json()["totals"][0]["unpriced_requests"] == 1

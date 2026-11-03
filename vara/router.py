@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from vara.providers.base import Completed, Message, ModelProvider, ProviderError, StreamEvent
-from vara.usage import UsageTracker, estimate_cost
+from vara.usage import estimate_cost
 
 
 class PrivacyMode(StrEnum):
@@ -40,15 +40,9 @@ class ModelRouter:
     tried before cloud ones, moving on when a provider fails before producing any text.
     """
 
-    def __init__(
-        self,
-        providers: Sequence[ModelProvider],
-        privacy_mode: PrivacyMode,
-        usage: UsageTracker | None = None,
-    ) -> None:
+    def __init__(self, providers: Sequence[ModelProvider], privacy_mode: PrivacyMode) -> None:
         self._providers = {p.name: p for p in providers}
         self.privacy_mode = privacy_mode
-        self.usage = usage or UsageTracker()
 
     @property
     def providers(self) -> list[ModelProvider]:
@@ -91,13 +85,6 @@ class ModelRouter:
             raise NoProviderAvailable({})
         return allowed
 
-    def _record(self, provider: ModelProvider, done: Completed) -> float | None:
-        cost = estimate_cost(
-            done.model, done.input_tokens, done.output_tokens, local=provider.capabilities.local
-        )
-        self.usage.record(provider.name, done.model, done.input_tokens, done.output_tokens, cost)
-        return cost
-
     def preview(
         self,
         messages: Sequence[Message],
@@ -133,7 +120,13 @@ class ModelRouter:
                 async for event in candidate.stream(messages, model=model, system=system):
                     started = True
                     if isinstance(event, Completed):
-                        yield RoutedEvent(candidate.name, event, self._record(candidate, event))
+                        cost = estimate_cost(
+                            event.model,
+                            event.input_tokens,
+                            event.output_tokens,
+                            local=candidate.capabilities.local,
+                        )
+                        yield RoutedEvent(candidate.name, event, cost)
                     else:
                         yield RoutedEvent(candidate.name, event)
                 return
