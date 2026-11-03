@@ -47,6 +47,16 @@ class ModelProvider(Protocol):
     default_model: str
     capabilities: Capabilities
 
+    def request_body(
+        self,
+        messages: Sequence[Message],
+        *,
+        model: str | None = None,
+        system: str | None = None,
+    ) -> dict:
+        """The exact payload `stream` would send, for inspection. Never contains credentials."""
+        ...
+
     def stream(
         self,
         messages: Sequence[Message],

@@ -1,10 +1,19 @@
+import json
+from collections.abc import AsyncIterator
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from vara.providers.base import Completed, Message, ProviderError, TextDelta
-from vara.router import ConfirmationRequired, ModelRouter, NoProviderAvailable, PrivacyBlocked
+from vara.router import (
+    ConfirmationRequired,
+    ModelRouter,
+    NoProviderAvailable,
+    PrivacyBlocked,
+    RoutedEvent,
+)
 
 v1 = APIRouter(prefix="/v1")
 
@@ -26,6 +35,9 @@ class ChatRequest(BaseModel):
     system: str | None = None
     confirm_cloud: bool = False
 
+    def to_messages(self) -> list[Message]:
+        return [Message(m.role, m.content) for m in self.messages]
+
 
 class Usage(BaseModel):
     input_tokens: int | None
@@ -38,10 +50,57 @@ class ChatResponse(BaseModel):
     text: str
     stop_reason: str | None
     usage: Usage
+    cost_usd: float | None
 
 
 def _router(request: Request) -> ModelRouter:
     return request.app.state.router
+
+
+def _http_error(exc: Exception) -> HTTPException:
+    if isinstance(exc, PrivacyBlocked):
+        return HTTPException(403, str(exc))
+    if isinstance(exc, ConfirmationRequired):
+        return HTTPException(409, f"{exc}; resend with confirm_cloud=true")
+    if isinstance(exc, NoProviderAvailable):
+        return HTTPException(503, {"message": str(exc), "errors": exc.errors})
+    return HTTPException(502, str(exc))
+
+
+_ROUTING_ERRORS = (PrivacyBlocked, ConfirmationRequired, NoProviderAvailable, ProviderError)
+
+
+async def _open_stream(request: Request, body: ChatRequest) -> AsyncIterator[RoutedEvent]:
+    """Start routing and wait for the first event, so privacy and provider failures become
+    ordinary HTTP errors instead of breaking a stream that has already started."""
+    events = _router(request).stream(
+        body.to_messages(),
+        provider=body.provider,
+        model=body.model,
+        system=body.system,
+        cloud_confirmed=body.confirm_cloud,
+    )
+    try:
+        first = await anext(events)
+    except _ROUTING_ERRORS as exc:
+        raise _http_error(exc) from exc
+
+    async def chained() -> AsyncIterator[RoutedEvent]:
+        yield first
+        async for routed in events:
+            yield routed
+
+    return chained()
+
+
+def _summary(routed: RoutedEvent, done: Completed) -> dict:
+    return {
+        "provider": routed.provider,
+        "model": done.model,
+        "stop_reason": done.stop_reason,
+        "usage": {"input_tokens": done.input_tokens, "output_tokens": done.output_tokens},
+        "cost_usd": routed.cost_usd,
+    }
 
 
 @v1.get("/providers")
@@ -56,40 +115,66 @@ def list_providers(request: Request) -> dict:
     }
 
 
-@v1.post("/chat")
-async def chat(body: ChatRequest, request: Request) -> ChatResponse:
-    messages = [Message(m.role, m.content) for m in body.messages]
-    parts: list[str] = []
-    provider = ""
-    completed: Completed | None = None
+@v1.get("/usage")
+def usage(request: Request) -> dict:
+    rows = _router(request).usage.summary()
+    return {"since_start": rows, "total_cost_usd": sum(row["cost_usd"] for row in rows)}
+
+
+@v1.post("/chat/preview")
+def chat_preview(body: ChatRequest, request: Request) -> dict:
+    """Show exactly what would be sent, and to which providers, without calling any model."""
+    router = _router(request)
     try:
-        async for routed in _router(request).stream(
-            messages,
+        candidates = router.preview(
+            body.to_messages(),
             provider=body.provider,
             model=body.model,
             system=body.system,
             cloud_confirmed=body.confirm_cloud,
-        ):
-            provider = routed.provider
+        )
+    except _ROUTING_ERRORS as exc:
+        raise _http_error(exc) from exc
+    return {"privacy_mode": router.privacy_mode, "candidates": candidates}
+
+
+@v1.post("/chat")
+async def chat(body: ChatRequest, request: Request) -> ChatResponse:
+    parts: list[str] = []
+    summary: dict | None = None
+    try:
+        async for routed in await _open_stream(request, body):
             if isinstance(routed.event, TextDelta):
                 parts.append(routed.event.text)
             else:
-                completed = routed.event
-    except PrivacyBlocked as exc:
-        raise HTTPException(403, str(exc)) from exc
-    except ConfirmationRequired as exc:
-        raise HTTPException(409, f"{exc}; resend with confirm_cloud=true") from exc
-    except NoProviderAvailable as exc:
-        raise HTTPException(503, {"message": str(exc), "errors": exc.errors}) from exc
-    except ProviderError as exc:
-        raise HTTPException(502, str(exc)) from exc
+                summary = _summary(routed, routed.event)
+    except _ROUTING_ERRORS as exc:
+        raise _http_error(exc) from exc
 
-    if completed is None:
-        raise HTTPException(502, f"{provider} ended without completing")
-    return ChatResponse(
-        provider=provider,
-        model=completed.model,
-        text="".join(parts),
-        stop_reason=completed.stop_reason,
-        usage=Usage(input_tokens=completed.input_tokens, output_tokens=completed.output_tokens),
+    if summary is None:
+        raise HTTPException(502, "The provider ended without completing")
+    return ChatResponse(text="".join(parts), **summary)
+
+
+def _sse(event: str, data: dict) -> str:
+    return f"event: {event}\ndata: {json.dumps(data)}\n\n"
+
+
+@v1.post("/chat/stream")
+async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
+    """Server-sent events: `delta` per text chunk, then `done` with usage, or `error`."""
+    events = await _open_stream(request, body)
+
+    async def sse() -> AsyncIterator[str]:
+        try:
+            async for routed in events:
+                if isinstance(routed.event, TextDelta):
+                    yield _sse("delta", {"provider": routed.provider, "text": routed.event.text})
+                else:
+                    yield _sse("done", _summary(routed, routed.event))
+        except _ROUTING_ERRORS as exc:
+            yield _sse("error", {"message": str(exc)})
+
+    return StreamingResponse(
+        sse(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"}
     )

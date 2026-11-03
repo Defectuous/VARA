@@ -62,6 +62,15 @@ Invoke-RestMethod http://127.0.0.1:8000/v1/chat -Method Post -ContentType applic
 
 Optional fields: `provider` (for example `"anthropic"`; a manual choice never falls back), `model`, `system`,
 and `confirm_cloud` (required in `ask` mode). Without a provider, local models are tried before cloud ones.
-The response names the provider and model that answered, with token usage.
+The response names the provider and model that answered, with token usage and estimated cost
+(`0.0` for local models, `null` for a cloud model without a known price).
+
+Other chat endpoints take the same body:
+
+| Endpoint | What it does |
+| --- | --- |
+| `POST /v1/chat/stream` | Server-sent events: `delta` per text chunk, then `done` (usage and cost) or `error`. Privacy and provider failures before the first chunk are normal HTTP errors. |
+| `POST /v1/chat/preview` | Calls no model. Lists the providers that would be tried, in order, with the exact request each would receive. |
+| `GET /v1/usage` | Requests, tokens, and cost per provider and model since the server started (not yet persisted). |
 
 Keep the service bound to localhost until device authentication is implemented.

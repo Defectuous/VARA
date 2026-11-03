@@ -34,13 +34,13 @@ class AnthropicProvider:
         self._max_tokens = max_tokens
         self._client = client or anthropic.AsyncAnthropic(api_key=api_key, timeout=120.0)
 
-    async def stream(
+    def request_body(
         self,
         messages: Sequence[Message],
         *,
         model: str | None = None,
         system: str | None = None,
-    ) -> AsyncIterator[StreamEvent]:
+    ) -> dict:
         params = {
             "model": model or self.default_model,
             "max_tokens": self._max_tokens,
@@ -51,6 +51,16 @@ class AnthropicProvider:
         }
         if system:
             params["system"] = system
+        return params
+
+    async def stream(
+        self,
+        messages: Sequence[Message],
+        *,
+        model: str | None = None,
+        system: str | None = None,
+    ) -> AsyncIterator[StreamEvent]:
+        params = self.request_body(messages, model=model, system=system)
         try:
             async with self._client.beta.messages.stream(**params) as stream:
                 async for text in stream.text_stream:

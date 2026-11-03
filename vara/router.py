@@ -2,7 +2,8 @@ from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
-from vara.providers.base import Message, ModelProvider, ProviderError, StreamEvent
+from vara.providers.base import Completed, Message, ModelProvider, ProviderError, StreamEvent
+from vara.usage import UsageTracker, estimate_cost
 
 
 class PrivacyMode(StrEnum):
@@ -29,6 +30,7 @@ class NoProviderAvailable(Exception):
 class RoutedEvent:
     provider: str
     event: StreamEvent
+    cost_usd: float | None = None  # set on the Completed event
 
 
 class ModelRouter:
@@ -38,9 +40,15 @@ class ModelRouter:
     tried before cloud ones, moving on when a provider fails before producing any text.
     """
 
-    def __init__(self, providers: Sequence[ModelProvider], privacy_mode: PrivacyMode) -> None:
+    def __init__(
+        self,
+        providers: Sequence[ModelProvider],
+        privacy_mode: PrivacyMode,
+        usage: UsageTracker | None = None,
+    ) -> None:
         self._providers = {p.name: p for p in providers}
         self.privacy_mode = privacy_mode
+        self.usage = usage or UsageTracker()
 
     @property
     def providers(self) -> list[ModelProvider]:
@@ -83,6 +91,32 @@ class ModelRouter:
             raise NoProviderAvailable({})
         return allowed
 
+    def _record(self, provider: ModelProvider, done: Completed) -> float | None:
+        cost = estimate_cost(
+            done.model, done.input_tokens, done.output_tokens, local=provider.capabilities.local
+        )
+        self.usage.record(provider.name, done.model, done.input_tokens, done.output_tokens, cost)
+        return cost
+
+    def preview(
+        self,
+        messages: Sequence[Message],
+        *,
+        provider: str | None = None,
+        model: str | None = None,
+        system: str | None = None,
+        cloud_confirmed: bool = False,
+    ) -> list[dict]:
+        """What each candidate would be sent, in the order they would be tried. Calls nothing."""
+        return [
+            {
+                "provider": candidate.name,
+                "local": candidate.capabilities.local,
+                "request": candidate.request_body(messages, model=model, system=system),
+            }
+            for candidate in self._candidates(provider, cloud_confirmed)
+        ]
+
     async def stream(
         self,
         messages: Sequence[Message],
@@ -98,7 +132,10 @@ class ModelRouter:
             try:
                 async for event in candidate.stream(messages, model=model, system=system):
                     started = True
-                    yield RoutedEvent(candidate.name, event)
+                    if isinstance(event, Completed):
+                        yield RoutedEvent(candidate.name, event, self._record(candidate, event))
+                    else:
+                        yield RoutedEvent(candidate.name, event)
                 return
             except ProviderError as exc:
                 if started:

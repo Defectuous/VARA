@@ -27,6 +27,18 @@ class OllamaProvider:
         self.default_model = default_model
         self._client = client or httpx.AsyncClient(base_url=base_url, timeout=120.0)
 
+    def request_body(
+        self,
+        messages: Sequence[Message],
+        *,
+        model: str | None = None,
+        system: str | None = None,
+    ) -> dict:
+        chat = [{"role": m.role, "content": m.content} for m in messages]
+        if system:
+            chat.insert(0, {"role": "system", "content": system})
+        return {"model": model or self.default_model, "messages": chat, "stream": True}
+
     async def stream(
         self,
         messages: Sequence[Message],
@@ -34,10 +46,7 @@ class OllamaProvider:
         model: str | None = None,
         system: str | None = None,
     ) -> AsyncIterator[StreamEvent]:
-        chat = [{"role": m.role, "content": m.content} for m in messages]
-        if system:
-            chat.insert(0, {"role": "system", "content": system})
-        body = {"model": model or self.default_model, "messages": chat, "stream": True}
+        body = self.request_body(messages, model=model, system=system)
         try:
             async with self._client.stream("POST", "/api/chat", json=body) as response:
                 if response.status_code != 200:

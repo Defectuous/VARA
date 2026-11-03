@@ -55,7 +55,7 @@ The roadmap is intentionally staged. Build a trustworthy local foundation first,
 
 ### 2. Add local and cloud model providers
 
-**Status:** Started. The provider interface, the fake provider, the privacy-mode router (tested), the Ollama and Anthropic adapters, and `/v1/chat` and `/v1/providers` exist. Claude and Ollama have each answered a live request; in `local_only` mode the answer came from Ollama with no cloud call. Remaining: OpenAI, Gemini, Groq, and OpenRouter adapters; cost tracking; context inspection; a streaming endpoint; the V100 benchmark.
+**Status:** Started. The provider interface, the fake provider, the privacy-mode router (tested), the Ollama and Anthropic adapters, and `/v1/chat` and `/v1/providers` exist. Claude and Ollama have each answered a live request; in `local_only` mode the answer came from Ollama with no cloud call. Streaming (`/v1/chat/stream`), context inspection (`/v1/chat/preview`), and in-memory cost tracking (`/v1/usage`) exist. Remaining: OpenAI, Gemini, Groq, and OpenRouter adapters; persisting usage (with the Phase 3 database); the V100 benchmark.
 
 **RTX 5060 benchmark (2026-11-03):** `llama3.1:8b` Q4_K_M sits fully in VRAM (4.9 GiB), generates about 76 tokens/s, and answers a 300-word prompt in under 5 seconds. With the model loaded, about 1.4 GiB of the card's 8 GiB is still free, which rules out a 12B/14B model on this card. `nvidia-smi` lists only the RTX 5060; the V100 is still not visible.
 
@@ -165,7 +165,7 @@ For local models, benchmark a quantized 7B/8B model on the RTX 5060; its 8 GB VR
 
 ## Next Implementation Session
 
-Continue Phase 2: add the OpenAI adapter (and Groq or xAI once it is clear which key is which); add per-request cost tracking and a way to inspect the context sent.
+Finish Phase 2: add the OpenAI adapter (and Groq or xAI once it is clear which key is which) and prices for its models. Then start Phase 3: SQLite with SQLAlchemy and Alembic, storing conversations and usage.
 
 ## Decisions to Confirm Before Model and Device Work
 
