@@ -8,6 +8,7 @@ from vara.config import Settings, get_settings
 from vara.credentials import get_api_key
 from vara.data_api import data
 from vara.db.database import Database
+from vara.google_docs import GoogleDocsClient
 from vara.providers.anthropic import AnthropicProvider
 from vara.providers.base import ModelProvider
 from vara.providers.ollama import OllamaProvider
@@ -28,7 +29,11 @@ def build_router(settings: Settings) -> ModelRouter:
     return ModelRouter(providers, settings.privacy_mode)
 
 
-def create_app(settings: Settings | None = None, router: ModelRouter | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    router: ModelRouter | None = None,
+    google: GoogleDocsClient | None = None,
+) -> FastAPI:
     settings = settings or get_settings()
     app = FastAPI(
         title="V.A.R.A. API",
@@ -48,6 +53,7 @@ def create_app(settings: Settings | None = None, router: ModelRouter | None = No
     app.state.settings = settings
     app.state.db = db
     app.state.router = router or build_router(settings)
+    app.state.google = google or GoogleDocsClient()
     # Unversioned liveness check for scripts and service managers.
     app.add_api_route("/health", health, methods=["GET"])
     app.include_router(v1)

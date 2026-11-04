@@ -55,7 +55,7 @@ The roadmap is intentionally staged. Build a trustworthy local foundation first,
 
 ### 2. Add local and cloud model providers
 
-**Status:** Started. The provider interface, the fake provider, the privacy-mode router (tested), the Ollama and Anthropic adapters, and `/v1/chat` and `/v1/providers` exist. Claude and Ollama have each answered a live request; in `local_only` mode the answer came from Ollama with no cloud call. Streaming (`/v1/chat/stream`), context inspection (`/v1/chat/preview`), and in-memory cost tracking (`/v1/usage`) exist. Remaining: OpenAI, Gemini, Groq, and OpenRouter adapters; persisting usage (with the Phase 3 database); the V100 benchmark.
+**Status:** Started. The provider interface, the fake provider, the privacy-mode router (tested), the Ollama and Anthropic adapters, and `/v1/chat` and `/v1/providers` exist. Claude and Ollama have each answered a live request; in `local_only` mode the answer came from Ollama with no cloud call. Streaming (`/v1/chat/stream`), context inspection (`/v1/chat/preview`), and in-memory cost tracking (`/v1/usage`) exist. Usage is now stored in the Phase 3 database. Remaining: OpenAI, Gemini, Groq, and OpenRouter adapters; the V100 benchmark.
 
 **RTX 5060 benchmark (2026-11-03):** `llama3.1:8b` Q4_K_M sits fully in VRAM (4.9 GiB), generates about 76 tokens/s, and answers a 300-word prompt in under 5 seconds. With the model loaded, about 1.4 GiB of the card's 8 GiB is still free, which rules out a 12B/14B model on this card. `nvidia-smi` lists only the RTX 5060; the V100 is still not visible.
 
@@ -94,6 +94,18 @@ Remaining:
 **Done when:** Memory survives restarts and upgrades, can be searched, exported, edited, and deleted, and a backup has been restored successfully on a test copy. Establish a regular backup schedule and a separate recovery path for any encryption keys.
 
 ### 4. Add a personal knowledge base (RAG)
+
+**Status:** Started. File access comes first:
+
+- First-run setup (`python -m vara setup`, or `POST /v1/access/setup` for the future apps) asks to read Documents, Downloads, and Desktop together. If declined, it asks about each, then for other folders, private subfolders, and Google Docs.
+- Every read goes through one access check that resolves `..`, symlinks, and junctions. V.A.R.A.'s own data folder (which sits inside Documents on this PC), credential files, and folders such as `.ssh` and `.git` are never read.
+- Permissions can be listed, added, and revoked.
+
+- Google Docs: read-only sign-in through the Google Drive API (`python -m vara google connect`), with the client and token in Credential Manager. Docs can be listed and read as text; nothing is fetched unless Google Docs was also allowed at setup. Tested against a fake Google; the live sign-in needs the user's OAuth client from Google Cloud Console (steps in the README).
+
+Remaining: text extraction, chunking with source locations, keyword then semantic search, cited answers, re-indexing on change (for Google Docs, by `modifiedTime`), and a live Google sign-in.
+
+**Google Docs:** Google Drive for Desktop's `.gdoc` files are only links, so Docs are read through the Drive API; Drive for Desktop is still useful for ordinary files in Drive, allowed as a folder. Exported text will be indexed locally like any other file.
 
 **Work:** Let you choose folders and files to index: documents, PDFs, notes, code, and past conversations. Extract text, split it into chunks, and keep each chunk linked to its source file and location. Start with keyword search (FTS5), then add semantic search with a local embedding model and combine the two. Answers that use your files must cite the passages they used. Re-index changed files, remove deleted ones, and keep indexing out of folders you have not chosen.
 
@@ -183,7 +195,7 @@ Remaining:
 
 ## Next Implementation Session
 
-Finish Phase 3: a scheduled backup through Windows Task Scheduler, copied off this PC. Add the OpenAI adapter once its key is in Credential Manager (and Groq or xAI once it is clear which key is which).
+Phase 4: text extraction and keyword search for the folders allowed at setup, with every read through the access check. Finish Phase 3 too: a scheduled backup through Windows Task Scheduler, copied off this PC. Add the OpenAI adapter once its key is in Credential Manager (and Groq or xAI once it is clear which key is which).
 
 ## Decisions to Confirm Before Model and Device Work
 

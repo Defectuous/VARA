@@ -97,3 +97,29 @@ class RetentionRule(Base):
     key: Mapped[str] = mapped_column(String(30), primary_key=True)
     keep_days: Mapped[int | None]
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+
+
+class AccessKind(StrEnum):
+    FOLDER = "folder"  # V.A.R.A. may read files in this folder and below
+    EXCLUDE = "exclude"  # never read this folder, even inside an allowed one
+    GOOGLE_DOCS = "google_docs"  # consent to read Google Docs once the account is connected
+
+
+class AccessGrant(Base):
+    """A permission the user gave (or a carve-out they made). Nothing is read without one."""
+
+    __tablename__ = "access_grants"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    kind: Mapped[AccessKind] = mapped_column(String(20))
+    path: Mapped[str | None] = mapped_column(Text)  # resolved absolute path; None for Google
+    granted_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class SetupStep(Base):
+    """First-run steps the user has completed, such as choosing what V.A.R.A. may access."""
+
+    __tablename__ = "setup_steps"
+
+    key: Mapped[str] = mapped_column(String(30), primary_key=True)
+    completed_at: Mapped[datetime] = mapped_column(default=utcnow)

@@ -2,10 +2,12 @@ from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
-from vara import retention, store, suggest
+from vara import access, google_docs, retention, store, suggest
 from vara.api import ROUTING_ERRORS, http_error
 from vara.db.database import Database
 from vara.db.models import (
+    AccessGrant,
+    AccessKind,
     Conversation,
     Memory,
     MemoryCategory,
@@ -266,3 +268,104 @@ def retention_due(request: Request) -> dict:
 def retention_apply(request: Request) -> dict:
     with _db(request).session() as session:
         return {"deleted": retention.apply(session)}
+
+
+# Access: which folders V.A.R.A. may read
+
+
+class AccessSetup(BaseModel):
+    """First-run choices. `folders` takes keys from `suggested` (documents, downloads,
+    desktop, google_drive) or full paths; `exclude` takes full paths inside those folders."""
+
+    folders: list[str] = []
+    exclude: list[str] = []
+    google_docs: bool = False
+
+
+class AccessCreate(BaseModel):
+    kind: AccessKind
+    path: str | None = None
+
+
+def _folder_path(value: str) -> str:
+    suggested = access.suggested_folders()
+    return str(suggested[value]) if value in suggested else value
+
+
+@data.get("/access")
+def access_overview(request: Request) -> dict:
+    with _db(request).session() as session:
+        return access.overview(session)
+
+
+@data.post("/access/setup")
+def access_setup(body: AccessSetup, request: Request) -> dict:
+    with _db(request).session() as session:
+        try:
+            access.complete_setup(
+                session,
+                folders=[_folder_path(f) for f in body.folders],
+                exclude=body.exclude,
+                google_docs=body.google_docs,
+            )
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from None
+        return access.overview(session)
+
+
+@data.post("/access", status_code=201)
+def access_add(body: AccessCreate, request: Request) -> dict:
+    with _db(request).session() as session:
+        try:
+            path = _folder_path(body.path) if body.path else None
+            return access.grant_dict(access.add(session, body.kind, path))
+        except ValueError as error:
+            raise HTTPException(422, str(error)) from None
+
+
+@data.delete("/access/{grant_id}", status_code=204)
+def access_remove(grant_id: int, request: Request) -> Response:
+    with _db(request).session() as session:
+        grant = session.get(AccessGrant, grant_id)
+        if grant is None:
+            raise HTTPException(404, "Permission not found")
+        session.delete(grant)
+    return Response(status_code=204)
+
+
+@data.get("/access/check")
+def access_check(request: Request, path: str = Query(min_length=1)) -> dict:
+    """Whether V.A.R.A. may read `path`, and why."""
+    with _db(request).session() as session:
+        decision = access.policy(session, request.app.state.settings.data_dir).check(path)
+        return {"path": str(access.resolve(path)), **decision.__dict__}
+
+
+# Google Docs (read-only; needs both the setup permission and a connected account)
+
+
+def _google(request: Request) -> google_docs.GoogleDocsClient:
+    with _db(request).session() as session:
+        if not access.google_docs_allowed(session):
+            raise HTTPException(403, "Google Docs access is not allowed; allow it in setup first")
+    return request.app.state.google
+
+
+async def _google_call(call):
+    try:
+        return await call
+    except google_docs.NotConnected as error:
+        raise HTTPException(409, str(error)) from None
+    except google_docs.GoogleError as error:
+        raise HTTPException(502, str(error)) from None
+
+
+@data.get("/google/docs")
+async def google_list(request: Request, limit: int = Query(200, ge=1, le=1000)) -> list[dict]:
+    docs = await _google_call(_google(request).list_docs(limit))
+    return [doc.__dict__ for doc in docs]
+
+
+@data.get("/google/docs/{doc_id}/text")
+async def google_text(doc_id: str, request: Request) -> dict:
+    return {"id": doc_id, "text": await _google_call(_google(request).text(doc_id))}

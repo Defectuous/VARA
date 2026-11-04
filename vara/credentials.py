@@ -11,3 +11,14 @@ def get_api_key(provider: str) -> str | None:
         return keyring.get_password(SERVICE, provider)
     except KeyringError:
         return None
+
+
+def set_secret(name: str, value: str) -> None:
+    keyring.set_password(SERVICE, name, value)
+
+
+def delete_secret(name: str) -> None:
+    try:
+        keyring.delete_password(SERVICE, name)
+    except KeyringError:
+        pass  # already absent

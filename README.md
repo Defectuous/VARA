@@ -129,6 +129,74 @@ particular items when a category has a time limit. `GET /v1/retention/due` shows
 delete, so you can pin items first. Rules are applied when the server starts (`VARA_RETENTION_ON_STARTUP=false`
 turns that off) and by `POST /v1/retention/apply`.
 
+## File access
+
+V.A.R.A. reads none of your files until you allow it. Run the first-run setup in a terminal:
+
+```powershell
+uv run python -m vara setup
+```
+
+It offers Documents, Downloads, and Desktop together, plus `My Drive` if Google Drive for Desktop is
+installed. If you decline, it asks about each one, then for any
+other folders, then for folders inside those to keep private, and whether it may read your Google Docs (see
+[Google Docs](#google-docs) for connecting the account). Running it again replaces your choices. The
+server logs a warning on startup until setup is done.
+
+Some things are never read, whatever you allow: V.A.R.A.'s own data folder; files such as `.env`, private
+keys (`id_rsa`, `*.pem`, `*.key`, `*.pfx`), and password databases (`*.kdbx`); and folders named `.ssh`,
+`.git`, `AppData`, or `node_modules` inside an allowed folder. Drive placeholders (`.gdoc`, `.gsheet`) are
+skipped; Google Docs are read through Google instead. Paths are resolved before checking, so `..`,
+shortcuts, symlinks, and junctions cannot reach outside an allowed folder.
+
+| Endpoint | What it does |
+| --- | --- |
+| `GET /v1/access` | Whether setup is done, the suggested folders, your current permissions, and Google Docs status |
+| `POST /v1/access/setup` | The same choices as the terminal setup: `folders` (`documents`, `downloads`, `desktop`, `google_drive`, or full paths), `exclude`, `google_docs` |
+| `POST /v1/access` | Add one permission: `kind` (`folder`, `exclude`, `google_docs`) and `path` |
+| `DELETE /v1/access/{id}` | Revoke one |
+| `GET /v1/access/check?path=` | Whether a path may be read, and why |
+
+### Google Docs
+
+V.A.R.A. reads Google Docs through the Google Drive API with read-only access: it can list and read your
+documents but never change, share, or delete anything. It needs both the Google Docs permission from setup and
+a connected account. Google Drive for Desktop does not help here, because its `.gdoc` files are only links;
+it is still useful for ordinary files in Drive (PDFs, Word files), which you can allow as a folder, such as
+`G:\My Drive`.
+
+One-time setup in [Google Cloud Console](https://console.cloud.google.com/), signed in with the Google account
+whose documents you want:
+
+1. Create a project (for example `VARA`).
+2. **APIs & Services → Library**: enable the **Google Drive API**.
+3. **Google Auth Platform → Branding**: fill in the app name and your email. **Audience**: choose
+   **External**, and add your own address as a test user.
+4. **Clients → Create client**: application type **Desktop app**. Download the JSON file.
+5. **Audience → Publish app**. In *Testing*, Google expires the sign-in every 7 days; once published, it
+   lasts until you revoke it. Google will not review an app only you use, so the sign-in page warns that it
+   is unverified: choose **Advanced**, then go to the app.
+
+Then connect:
+
+```powershell
+uv run python -m vara google connect C:\path\to\client_secret.json   # opens the browser to sign in
+uv run python -m vara google status
+uv run python -m vara google disconnect                               # revokes access at Google too
+```
+
+The client and the sign-in token are stored in Windows Credential Manager (`vara/google-client` and
+`vara/google`), so you can delete the downloaded JSON file afterwards. You can also remove access at any time
+at [myaccount.google.com/permissions](https://myaccount.google.com/permissions).
+
+| Endpoint | What it does |
+| --- | --- |
+| `GET /v1/google/docs?limit=` | Your Google Docs, most recently modified first (not including the bin) |
+| `GET /v1/google/docs/{id}/text` | One document as plain text |
+
+Both return 403 until Google Docs is allowed in setup, and 409 with instructions if the account is not
+connected or the sign-in has expired.
+
 ## Backups
 
 ```powershell
