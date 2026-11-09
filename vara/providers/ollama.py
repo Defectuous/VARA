@@ -22,10 +22,17 @@ class OllamaProvider:
         *,
         base_url: str = "http://127.0.0.1:11434",
         default_model: str = "llama3.1:8b",
+        keep_alive: str | None = None,
+        models: Sequence[str] = (),
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self.default_model = default_model
+        # Models offered for a manual choice; the default always comes first.
+        self.models = list(dict.fromkeys([default_model, *models]))
+        self.keep_alive = keep_alive
         self._client = client or httpx.AsyncClient(base_url=base_url, timeout=120.0)
+        # Whether each model can reason ("thinking" capability), learned from /api/show.
+        self._thinking: dict[str, bool] = {}
 
     def request_body(
         self,
@@ -33,11 +40,31 @@ class OllamaProvider:
         *,
         model: str | None = None,
         system: str | None = None,
+        think: bool | None = None,
     ) -> dict:
         chat = [{"role": m.role, "content": m.content} for m in messages]
         if system:
             chat.insert(0, {"role": "system", "content": system})
-        return {"model": model or self.default_model, "messages": chat, "stream": True}
+        name = model or self.default_model
+        body = {"model": name, "messages": chat, "stream": True}
+        # Only reasoning models accept `think`; send it unless the model is known not to.
+        if think is not None and self._thinking.get(name, True):
+            body["think"] = think
+        if self.keep_alive is not None:
+            body["keep_alive"] = self.keep_alive
+        return body
+
+    async def _learn_thinking(self, model: str) -> None:
+        if model in self._thinking:
+            return
+        try:
+            response = await self._client.post("/api/show", json={"model": model})
+            if not response.is_success:
+                return
+            capabilities = response.json().get("capabilities") or []
+        except (httpx.HTTPError, ValueError):
+            return  # try again next time; meanwhile `think` is left out only if known unsupported
+        self._thinking[model] = "thinking" in capabilities
 
     async def stream(
         self,
@@ -45,8 +72,11 @@ class OllamaProvider:
         *,
         model: str | None = None,
         system: str | None = None,
+        think: bool | None = None,
     ) -> AsyncIterator[StreamEvent]:
-        body = self.request_body(messages, model=model, system=system)
+        if think is not None:
+            await self._learn_thinking(model or self.default_model)
+        body = self.request_body(messages, model=model, system=system, think=think)
         try:
             async with self._client.stream("POST", "/api/chat", json=body) as response:
                 if response.status_code != 200:

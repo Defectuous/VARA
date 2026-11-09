@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="V.A.R.A.">
+  <!-- Tray icon for 16-24px: the same design with a heavier stroke (32 instead of 26; the wing's lines are
+       ~35 units apart, so more would merge them) and a slightly larger wing, so it stays legible at 16px. -->
+  <circle cx="32" cy="32" r="32" fill="#121214"/>
+  <svg x="8" y="13.5" width="48" height="37" viewBox="0 0 460 360" fill="none" stroke="#F4F2ED" stroke-width="32" stroke-linecap="round" stroke-linejoin="miter" stroke-miterlimit="8">
+    <path d="M8 340 C80 318 112 268 110 198 C205 172 340 112 452 10"/>
+    <path d="M139 223 C219 198 322 152 416 81"/>
+    <path d="M133 258 C198 240 283 205 366 154"/>
+    <path d="M135 291 C183 277 243 255 306 224"/>
+    <path d="M66 348 C84 337 99 323 110 307"/>
+  </svg>
+</svg>

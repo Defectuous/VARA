@@ -8,3 +8,7 @@ __pycache__/
 !.env.example
 /data/
 /models/
+# .NET build output (clients/windows)
+bin/
+obj/
+/clients/windows/publish/

@@ -1,0 +1,78 @@
+# V.A.R.A.'s SearXNG settings. SearXNG reads its built-in defaults first (use_default_settings) and then
+# these overrides, so updating the SearXNG checkout keeps this file working.
+use_default_settings:
+  engines:
+    # The major search engines, plus Wikipedia/Wikidata for facts and news engines for current events.
+    keep_only:
+      - google
+      - bing
+      - duckduckgo
+      - brave
+      - startpage
+      - mojeek
+      - wikipedia
+      - wikidata
+      - google news
+      - bing news
+      - duckduckgo news
+      - brave.news
+      - startpage news
+      - mojeek news
+      - wikinews
+
+general:
+  instance_name: "V.A.R.A. search"
+  enable_metrics: false
+
+server:
+  # Only this computer can use it. The port and secret key are set by V.A.R.A. when it starts SearXNG
+  # (SEARXNG_PORT, SEARXNG_SECRET).
+  bind_address: "127.0.0.1"
+  limiter: false
+  public_instance: false
+  image_proxy: false
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  # V.A.R.A. reads results as JSON.
+  formats:
+    - html
+    - json
+
+outgoing:
+  request_timeout: 4.0
+  max_request_timeout: 8.0
+
+engines:
+  # Some of these are off in SearXNG's defaults; turn them all on.
+  - name: google
+    disabled: false
+  - name: bing
+    disabled: false
+  - name: duckduckgo
+    disabled: false
+  - name: brave
+    disabled: false
+  - name: startpage
+    disabled: false
+  - name: mojeek
+    disabled: false
+  - name: wikipedia
+    disabled: false
+  - name: wikidata
+    disabled: false
+  - name: google news
+    disabled: false
+  - name: bing news
+    disabled: false
+  - name: duckduckgo news
+    disabled: false
+  - name: brave.news
+    disabled: false
+  - name: startpage news
+    disabled: false
+  - name: mojeek news
+    disabled: false
+  - name: wikinews
+    disabled: false

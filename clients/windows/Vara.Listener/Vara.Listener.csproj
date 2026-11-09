@@ -1,0 +1,36 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>VaraListener</AssemblyName>
+    <RootNamespace>Vara.Listener</RootNamespace>
+    <ApplicationIcon>..\..\..\assets\icons\build\app-icon.ico</ApplicationIcon>
+    <Product>V.A.R.A. Listener</Product>
+    <Description>Listens for "VARA" and answers through the V.A.R.A. backend on this PC.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.31.1" />
+    <PackageReference Include="NAudio.WinMM" Version="3.3.0" />
+    <PackageReference Include="System.Speech" Version="10.0.14" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Vara.Listener.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Icons are built from assets/icons by tools/build_icons.py. -->
+    <None Include="..\..\..\assets\icons\build\tray-icon.ico" Link="tray-icon.ico" CopyToOutputDirectory="PreserveNewest" />
+    <!-- openWakeWord's shared feature models, and the trained "VARA" model (produced by the wake-word training). -->
+    <None Include="models\*.onnx" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\..\models\vara.onnx" Link="models\vara.onnx" CopyToOutputDirectory="PreserveNewest"
+          Condition="Exists('..\..\..\models\vara.onnx')" />
+    <None Include="appsettings.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

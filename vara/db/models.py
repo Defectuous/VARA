@@ -116,6 +116,46 @@ class AccessGrant(Base):
     granted_at: Mapped[datetime] = mapped_column(default=utcnow)
 
 
+class PriceWatch(Base):
+    """Something to re-price on a schedule (vara/price_watch.py). With a target price, an alert is raised
+    when an offer is at or below it; without one, when the price drops at least 5% below the lowest seen."""
+
+    __tablename__ = "price_watches"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    query: Mapped[str] = mapped_column(String(120))
+    target_price: Mapped[float | None]
+    active: Mapped[bool] = mapped_column(default=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    last_checked_at: Mapped[datetime | None]
+    # The lowest price seen so far, and where.
+    best_price: Mapped[float | None]
+    best_store: Mapped[str | None] = mapped_column(String(100))
+    best_title: Mapped[str | None] = mapped_column(Text)
+    best_url: Mapped[str | None] = mapped_column(Text)
+    alerted_price: Mapped[
+        float | None
+    ]  # the price of the last alert, so the same deal isn't re-sent
+
+
+class PriceAlert(Base):
+    __tablename__ = "price_alerts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    watch_id: Mapped[int] = mapped_column(
+        ForeignKey("price_watches.id", ondelete="CASCADE"), index=True
+    )
+    query: Mapped[str] = mapped_column(String(120))
+    price: Mapped[float]
+    store: Mapped[str] = mapped_column(String(100))
+    title: Mapped[str] = mapped_column(Text)
+    url: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    seen_at: Mapped[
+        datetime | None
+    ]  # set once V.A.R.A. has told you (in a reply or on the chat page)
+
+
 class SetupStep(Base):
     """First-run steps the user has completed, such as choosing what V.A.R.A. may access."""
 

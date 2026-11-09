@@ -40,6 +40,7 @@ class AnthropicProvider:
         *,
         model: str | None = None,
         system: str | None = None,
+        think: bool | None = None,
     ) -> dict:
         params = {
             "model": model or self.default_model,
@@ -59,6 +60,7 @@ class AnthropicProvider:
         *,
         model: str | None = None,
         system: str | None = None,
+        think: bool | None = None,
     ) -> AsyncIterator[StreamEvent]:
         params = self.request_body(messages, model=model, system=system)
         try:

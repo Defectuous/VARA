@@ -92,6 +92,7 @@ class ModelRouter:
         provider: str | None = None,
         model: str | None = None,
         system: str | None = None,
+        think: bool | None = None,
         cloud_confirmed: bool = False,
     ) -> list[dict]:
         """What each candidate would be sent, in the order they would be tried. Calls nothing."""
@@ -99,7 +100,9 @@ class ModelRouter:
             {
                 "provider": candidate.name,
                 "local": candidate.capabilities.local,
-                "request": candidate.request_body(messages, model=model, system=system),
+                "request": candidate.request_body(
+                    messages, model=model, system=system, think=think
+                ),
             }
             for candidate in self._candidates(provider, cloud_confirmed)
         ]
@@ -111,13 +114,16 @@ class ModelRouter:
         provider: str | None = None,
         model: str | None = None,
         system: str | None = None,
+        think: bool | None = None,
         cloud_confirmed: bool = False,
     ) -> AsyncIterator[RoutedEvent]:
         errors: dict[str, str] = {}
         for candidate in self._candidates(provider, cloud_confirmed):
             started = False
             try:
-                async for event in candidate.stream(messages, model=model, system=system):
+                async for event in candidate.stream(
+                    messages, model=model, system=system, think=think
+                ):
                     started = True
                     if isinstance(event, Completed):
                         cost = estimate_cost(

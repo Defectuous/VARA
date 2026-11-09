@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="Vara.Listener.Tests/Vara.Listener.Tests.csproj" />
+  <Project Path="Vara.Listener/Vara.Listener.csproj" />
+</Solution>

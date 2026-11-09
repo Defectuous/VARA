@@ -1,3 +1,4 @@
+import asyncio
 from collections.abc import AsyncIterator, Sequence
 
 from vara.providers.base import (
@@ -21,6 +22,7 @@ class FakeProvider:
         reply: str | None = None,
         fail: bool = False,
         usage: tuple[int, int] | None = None,
+        delay: float = 0.0,
     ) -> None:
         self.name = name
         self.default_model = f"{name}-model"
@@ -28,7 +30,9 @@ class FakeProvider:
         self._reply = reply
         self._fail = fail
         self._usage = usage
+        self._delay = delay  # seconds before the first text, like a model loading or reasoning
         self.calls: list[list[Message]] = []
+        self.thinks: list[bool | None] = []
 
     def request_body(
         self,
@@ -36,6 +40,7 @@ class FakeProvider:
         *,
         model: str | None = None,
         system: str | None = None,
+        think: bool | None = None,
     ) -> dict:
         return {
             "model": model or self.default_model,
@@ -49,8 +54,12 @@ class FakeProvider:
         *,
         model: str | None = None,
         system: str | None = None,
+        think: bool | None = None,
     ) -> AsyncIterator[StreamEvent]:
         self.calls.append(list(messages))
+        self.thinks.append(think)
+        if self._delay:
+            await asyncio.sleep(self._delay)
         if self._fail:
             raise ProviderError(f"{self.name} is unavailable")
         reply = self._reply if self._reply is not None else f"echo: {messages[-1].content}"

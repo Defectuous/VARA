@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 140 140" role="img" aria-label="V.A.R.A.">
+  <!-- App icon: from the Wing logo design ("Icon sizes"): 140px square, 32px radius, accent #5B6CF0, white wing 96x73, stroke 20. -->
+  <rect width="140" height="140" rx="32" fill="#5B6CF0"/>
+  <svg x="22" y="33.5" width="96" height="73" viewBox="0 0 460 360" fill="none" stroke="#FFFFFF" stroke-width="20" stroke-linecap="round" stroke-linejoin="miter" stroke-miterlimit="8">
+    <path d="M8 340 C80 318 112 268 110 198 C205 172 340 112 452 10"/>
+    <path d="M139 223 C219 198 322 152 416 81"/>
+    <path d="M133 258 C198 240 283 205 366 154"/>
+    <path d="M135 291 C183 277 243 255 306 224"/>
+    <path d="M66 348 C84 337 99 323 110 307"/>
+  </svg>
+</svg>

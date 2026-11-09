@@ -30,6 +30,11 @@ def test_chat_returns_answer_and_which_model_answered() -> None:
         "usage": {"input_tokens": None, "output_tokens": None},
         "cost_usd": 0.0,
         "memories_used": [],
+        "web_search": None,
+        "market_data": None,
+        "deals": None,
+        "price_alerts": None,
+        "reasoning": False,
     }
 
 
@@ -157,3 +162,132 @@ def test_unknown_cloud_model_cost_is_none() -> None:
 
     assert client.post("/v1/chat", json=HELLO).json()["cost_usd"] is None
     assert client.get("/v1/usage").json()["totals"][0]["unpriced_requests"] == 1
+
+
+def _sent_system(client: TestClient, **extra) -> str | None:
+    response = client.post("/v1/chat/preview", json={**HELLO, **extra})
+    return response.json()["candidates"][0]["request"]["system"]
+
+
+def test_default_system_prompt_names_vara_and_today() -> None:
+    from datetime import datetime
+
+    system = _sent_system(client_for(FakeProvider("local"), mode=PrivacyMode.LOCAL_ONLY))
+
+    assert "V.A.R.A." in system
+    assert str(datetime.now().astimezone().year) in system and "{date}" not in system
+
+
+def test_request_system_prompt_replaces_the_default() -> None:
+    client = client_for(FakeProvider("local"), mode=PrivacyMode.LOCAL_ONLY)
+
+    assert _sent_system(client, system="be brief") == "be brief"
+    assert _sent_system(client, system="") is None
+
+
+def test_configured_system_prompt_is_used() -> None:
+    app = create_app(
+        Settings(system_prompt="You are terse.", personality=""),
+        router=ModelRouter([FakeProvider("local")], PrivacyMode.LOCAL_ONLY),
+    )
+
+    assert _sent_system(TestClient(app)) == "You are terse."
+
+
+def test_personality_follows_the_configured_prompt_but_not_a_request_prompt() -> None:
+    app = create_app(
+        Settings(system_prompt="You are terse.", personality="Be cheeky."),
+        router=ModelRouter([FakeProvider("local")], PrivacyMode.LOCAL_ONLY),
+    )
+    client = TestClient(app)
+
+    assert _sent_system(client) == "You are terse.\n\nBe cheeky."
+    assert _sent_system(client, system="be brief") == "be brief"
+
+
+def test_spoken_requests_ask_for_a_short_plain_reply() -> None:
+    client = client_for(FakeProvider("local"), mode=PrivacyMode.LOCAL_ONLY)
+
+    spoken = _sent_system(client, spoken=True)
+
+    assert "V.A.R.A." in spoken and "spoken aloud" in spoken
+    assert "spoken aloud" not in _sent_system(client)
+    assert _sent_system(client, system="", spoken=True).startswith(
+        "Your reply will be spoken aloud"
+    )
+
+
+def test_the_prompt_carries_the_current_date_and_time() -> None:
+    from datetime import datetime, timedelta, timezone
+
+    from vara.api import fill_clock
+
+    now = datetime(2026, 11, 5, 7, 4, tzinfo=timezone(timedelta(hours=-5), "EST"))
+
+    filled = fill_clock("Today is {date}, and the local time is {time} ({timezone}).", now, "EST")
+
+    assert filled == "Today is Thursday, November 5, 2026, and the local time is 7:04 AM (EST)."
+
+
+def test_default_prompt_has_no_unfilled_placeholders() -> None:
+    system = _sent_system(client_for(FakeProvider("local"), mode=PrivacyMode.LOCAL_ONLY))
+
+    assert "{" not in system and "local time is" in system
+
+
+def test_the_asking_devices_clock_is_used_when_it_sends_one() -> None:
+    client = client_for(FakeProvider("local"), mode=PrivacyMode.LOCAL_ONLY)
+
+    system = _sent_system(
+        client, client_time="2026-11-05T21:30:00+09:00", client_timezone="Asia/Tokyo"
+    )
+
+    assert "Thursday, November 5, 2026" in system
+    assert "9:30 PM (Asia/Tokyo)" in system
+
+
+def test_a_device_clock_without_a_zone_name_shows_its_offset() -> None:
+    client = client_for(FakeProvider("local"), mode=PrivacyMode.LOCAL_ONLY)
+
+    system = _sent_system(client, client_time="2026-11-05T07:04:00-05:00")
+
+    assert "7:04 AM (UTC-05:00)" in system
+
+
+def test_a_device_clock_must_include_its_offset() -> None:
+    client = client_for(FakeProvider("local"), mode=PrivacyMode.LOCAL_ONLY)
+
+    response = client.post("/v1/chat/preview", json={**HELLO, "client_time": "2026-11-05T07:04:00"})
+
+    assert response.status_code == 422
+
+
+def test_chat_picks_reasoning_per_message_and_reports_it() -> None:
+    local = FakeProvider("local")
+    client = client_for(local, mode=PrivacyMode.LOCAL_ONLY)
+
+    quick = client.post("/v1/chat", json=HELLO).json()
+    hard = client.post(
+        "/v1/chat", json={"messages": [{"role": "user", "content": "Why is the sky blue?"}]}
+    ).json()
+    forced = client.post("/v1/chat", json={**HELLO, "reasoning": "on"}).json()
+
+    assert (quick["reasoning"], hard["reasoning"], forced["reasoning"]) == (False, True, True)
+    assert local.thinks == [False, True, True]
+
+
+def test_providers_endpoint_lists_each_providers_models() -> None:
+    client = client_for(FakeProvider("local"), mode=PrivacyMode.LOCAL_ONLY)
+    client.app.state.router.providers[0].models = ["local-model", "bigger-model"]
+
+    body = client.get("/v1/providers").json()
+
+    assert body["providers"][0]["models"] == ["local-model", "bigger-model"]
+
+
+def test_providers_endpoint_defaults_models_to_the_default_model() -> None:
+    client = client_for(FakeProvider("local"), mode=PrivacyMode.LOCAL_ONLY)
+
+    body = client.get("/v1/providers").json()
+
+    assert body["providers"][0]["models"] == ["local-model"]

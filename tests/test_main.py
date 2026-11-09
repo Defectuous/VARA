@@ -24,3 +24,27 @@ def test_docs_are_available_in_development() -> None:
     client = TestClient(create_app(Settings(environment=Environment.DEVELOPMENT)))
 
     assert client.get("/docs").status_code == 200
+
+
+def test_root_serves_the_chat_page() -> None:
+    response = TestClient(create_app(Settings())).get("/")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/html")
+    assert "/v1/chat/stream" in response.text
+
+
+@pytest.mark.parametrize(
+    ("path", "content_type"),
+    [
+        ("/favicon.ico", "image/"),
+        ("/favicon.svg", "image/svg+xml"),
+        ("/apple-touch-icon.png", "image/png"),
+    ],
+)
+def test_chat_page_icons_are_served(path: str, content_type: str) -> None:
+    response = TestClient(create_app(Settings())).get(path)
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith(content_type)
+    assert len(response.content) > 100

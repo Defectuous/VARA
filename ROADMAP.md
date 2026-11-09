@@ -131,6 +131,8 @@ Remaining: text extraction, chunking with source locations, keyword then semanti
 
 ### 7. Build the clients: Windows, macOS, Linux, Android
 
+**Status:** Started, with a change of plan for Windows. The backend serves a chat page at `/` (streaming, history, model choice, privacy mode, web sources). The first Windows app is a native .NET 10 tray app (`clients/windows`) rather than Flutter: it listens for "VARA" and answers out loud (see Phase 8), with the black-circle tray icon, pause/resume, and an "Open chat" link. Android comes next (pairing and Tailscale from Phase 6 first); Linux and iOS later; iOS cannot listen for a wake word in the background.
+
 **Work:** Build one client against the stable API with chat, history, model and privacy-mode selection, approval prompts, and a **Command Center** dashboard. The dashboard shows connection state, active model, running tasks, pending approvals, recent actions, and microphone and camera state. On desktop, add a system tray icon, a global hotkey, and launch at login. On Android, use notifications for approvals and a foreground service for anything that runs in the background. Ship Windows first, then add macOS and Linux, then Android.
 
 **Tools:** Flutter (one codebase for all four platforms); `tray_manager` and `hotkey_manager` for desktop tray icons and hotkeys; `flutter_secure_storage` for tokens; Android permission and foreground-service APIs.
@@ -139,6 +141,16 @@ Remaining: text extraction, chunking with source locations, keyword then semanti
 
 ### 8. Add voice
 
+**Status:** Started, ahead of the clients phase. Done:
+
+- Speech-to-text on the backend (`/v1/voice/transcribe`, faster-whisper `small` on the CPU, about 1.6 s for a short question), which also checks that a transcript starts with "VARA" so false wake-ups are dropped.
+- Text-to-speech on the backend (`/v1/voice/speak`), Kokoro-82M with the `bf_lily` voice (British female), about 0.8 s per sentence on the CPU.
+- A custom "VARA" wake word trained with openWakeWord on synthetic voices (WSL, RTX 5060), run in the Windows listener through a C# port of openWakeWord's pipeline that matches the Python reference to within 0.001.
+- The listener: wake word, then it records until you stop talking, transcribes, asks chat (`spoken: true` for short plain answers), and speaks the reply sentence by sentence as it streams. Saying "VARA" interrupts it, and saying only "VARA" gets a "Yes?". Replies continue one conversation for 10 minutes.
+- Each request carries the device's own clock and time zone, so the time V.A.R.A. gives is the time where you are.
+
+Remaining: wake-word accuracy (model v5: about 63% of plain "VARA" from unfamiliar voices, "hey VARA" about 99%, about 1.5 false wake-ups per hour on noisy background audio; v3 is kept as `vara-v3.onnx` for comparison), measuring false wake-ups at home, echo cancellation so its own voice can't trigger it, a hands-free mode, and a local voice for when the backend is unreachable.
+
 **Work:** Add speech-to-text and spoken responses, then streaming speech (start speaking before the full answer is ready), interruption (stop speaking when you talk), a wake word, and a hands-free conversation mode. The client always shows when the microphone is listening. Process voice locally by default; cloud voices are optional and follow the privacy mode. Keep text-only use available if a voice model is unavailable.
 
 **Tools:** `faster-whisper` for local speech recognition; Piper for local speech generation; openWakeWord for the wake word; voice activity detection (for example Silero VAD) for interruption. On Android, wake-word listening must run in a visible foreground service; on macOS it needs microphone permission.
@@ -146,6 +158,8 @@ Remaining: text extraction, chunking with source locations, keyword then semanti
 **Done when:** A full voice conversation works on the PC with networking disabled, interruption stops playback reliably, false wake-ups are measured and acceptably rare, and uncertain transcriptions can be reviewed before an action runs.
 
 ### 9. Add computer control and browser tasks
+
+**Status:** Web search is done ahead of the rest: V.A.R.A. runs its own SearXNG (a checkout of its GitHub repository with its own environment, no Docker, updated daily with automatic rollback) and searches Google, Bing, DuckDuckGo, Brave, Startpage, Mojeek, Wikipedia, and news engines when a question needs current information. Answers name their sources. Searching looks only at the latest message so far; follow-ups such as "and the vice president?" may not search.
 
 **Work:** Add tools for launching and closing apps, working with files and folders, searching the computer, changing supported settings (volume, display, power, and similar), web search, and browser-assisted tasks. These tools act on the machine they run on, so add a small, signed **local agent host** for each desktop OS. It is paired like a device, receives approved actions from the backend, runs them, and reports results. Implement Windows first, then macOS and Linux. Android support is limited to what the platform permits, such as opening apps and sharing content. Every tool that changes something uses the Phase 5 approval layer.
 
@@ -195,7 +209,41 @@ Remaining: text extraction, chunking with source locations, keyword then semanti
 
 ## Next Implementation Session
 
-Phase 4: text extraction and keyword search for the folders allowed at setup, with every read through the access check. Finish Phase 3 too: a scheduled backup through Windows Task Scheduler, copied off this PC. Add the OpenAI adapter once its key is in Credential Manager (and Groq or xAI once it is clear which key is which).
+Test the voice listener with real use (wake-word hit rate and false wake-ups at home) and keep improving the wake word. Then Phase 5's agent loop and approval layer, which the custom-agents and self-upgrade goals in **To Do** build on; web search becomes its first tool. Still open from earlier: Phase 4 text extraction and keyword search for allowed folders; Phase 3's scheduled off-PC backup; the OpenAI adapter once its key is in Credential Manager.
+
+## To Do
+
+Goals that span several phases. Each one builds on the Phase 5 action layer, so everything it does stays
+typed, approved, audited, and reversible.
+
+- [ ] **V.A.R.A. builds custom agents when a request needs one.** When a request is bigger than a single
+  answer or tool call (for example "watch these three sites and tell me when prices drop", or "research X
+  and write me a summary every Monday"), V.A.R.A. designs a purpose-built agent for it: its goal, the tools
+  it may use, its permissions, limits, schedule, and how it reports back.
+  - Agents are definitions V.A.R.A. writes (Pydantic schemas plus instructions), run by the Phase 5 agent
+    loop, not free-form code. An agent may only use tools that already exist, within the permissions it
+    was granted.
+  - The owner approves each new agent before it first runs, seeing exactly what it will do, which tools and
+    data it can touch, and when it runs. Later runs need no approval while they stay inside that scope;
+    anything outside it asks again.
+  - Agents can be listed, paused, edited, and deleted, and each run has an audit history.
+  - If a request needs a tool that doesn't exist yet, V.A.R.A. proposes building it through the
+    self-upgrade pipeline below instead of working around the gap.
+  - The owner has said they will fully support this, so it is a priority once Phase 5 is in place.
+- [ ] **V.A.R.A. upgrades itself.** V.A.R.A. notices changes: new hardware such as the V100, new or updated
+  models, new API keys, dependency and security updates, and its own recurring failures. It works out what
+  should change and prepares the upgrade.
+  - Code changes are written by Claude Code (Agent SDK) in a separate git worktree.
+  - Every upgrade is tested before it is offered: the full test suite, lint, and smoke checks against a
+    trial server.
+  - The owner approves each upgrade in an Upgrades panel that shows the change, the reason, the diff, and
+    the test results.
+  - Before applying, it backs up the database and tags the commit; if health checks fail afterwards, it
+    rolls back automatically.
+  - It never changes privacy enforcement, file-access checks, credential handling, or the upgrade pipeline
+    itself without the owner's review.
+  - Order: detection, testing, and rollback for configuration and dependency upgrades first; code changes
+    and the approval screen after that.
 
 ## Decisions to Confirm Before Model and Device Work
 

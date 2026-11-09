@@ -41,6 +41,8 @@ class ModelProvider(Protocol):
     """One model backend. Every provider streams text and ends with exactly one `Completed`.
 
     Providers are only called through `ModelRouter`, which enforces the privacy mode.
+    `think` asks the model to reason before answering (True) or to answer straight away (False);
+    None leaves the model's own default. Providers that can't switch it ignore it.
     """
 
     name: str
@@ -53,6 +55,7 @@ class ModelProvider(Protocol):
         *,
         model: str | None = None,
         system: str | None = None,
+        think: bool | None = None,
     ) -> dict:
         """The exact payload `stream` would send, for inspection. Never contains credentials."""
         ...
@@ -63,4 +66,5 @@ class ModelProvider(Protocol):
         *,
         model: str | None = None,
         system: str | None = None,
+        think: bool | None = None,
     ) -> AsyncIterator[StreamEvent]: ...

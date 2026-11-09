@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="V.A.R.A.">
+  <!-- Tray icon: from the Wing logo design ("Icon sizes"): 64px circle #121214, wing #F4F2ED 42x32, stroke 26. -->
+  <circle cx="32" cy="32" r="32" fill="#121214"/>
+  <svg x="11" y="16" width="42" height="32" viewBox="0 0 460 360" fill="none" stroke="#F4F2ED" stroke-width="26" stroke-linecap="round" stroke-linejoin="miter" stroke-miterlimit="8">
+    <path d="M8 340 C80 318 112 268 110 198 C205 172 340 112 452 10"/>
+    <path d="M139 223 C219 198 322 152 416 81"/>
+    <path d="M133 258 C198 240 283 205 366 154"/>
+    <path d="M135 291 C183 277 243 255 306 224"/>
+    <path d="M66 348 C84 337 99 323 110 307"/>
+  </svg>
+</svg>

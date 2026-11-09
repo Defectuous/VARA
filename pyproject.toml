@@ -8,11 +8,16 @@ dependencies = [
     "alembic>=1.14,<2.0",
     "anthropic>=1.0,<2.0",
     "fastapi>=0.115,<1.0",
+    "faster-whisper>=1.1,<2.0",
     "google-auth-oauthlib>=1.5.0",
     "httpx>=0.28,<1.0",
     "keyring>=25,<26",
+    "kokoro-onnx>=0.4,<1",
+    "nvidia-cublas-cu12>=12,<13 ; sys_platform != 'darwin'",
+    "nvidia-cudnn-cu12>=9,<10 ; sys_platform != 'darwin'",
     "pydantic-settings>=2.6,<3.0",
     "sqlalchemy>=2.0,<3.0",
+    "tzdata>=2024.1",
     "uvicorn[standard]>=0.34,<1.0",
 ]
 
@@ -24,6 +29,12 @@ dev = [
 
 [tool.uv]
 package = false
+# Pick package versions that have builds for both this Windows PC and the Linux host (some NVIDIA
+# library releases are Linux-only).
+required-environments = [
+    "sys_platform == 'win32' and platform_machine == 'AMD64'",
+    "sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

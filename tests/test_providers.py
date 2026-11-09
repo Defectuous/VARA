@@ -113,3 +113,54 @@ def test_ollama_http_error_raises_provider_error() -> None:
 
     with pytest.raises(ProviderError, match="404"):
         drain(provider)
+
+
+def test_ollama_sends_keep_alive_when_configured() -> None:
+    provider = OllamaProvider(keep_alive="2h")
+
+    assert provider.request_body([Message("user", "hi")])["keep_alive"] == "2h"
+    assert "keep_alive" not in OllamaProvider().request_body([Message("user", "hi")])
+
+
+def _ollama_with_capabilities(capabilities: list[str], sent: list[dict]) -> OllamaProvider:
+    done = {"model": "llama3.1:8b", "done": True, "done_reason": "stop"}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/show":
+            return httpx.Response(200, json={"capabilities": capabilities})
+        sent.append(json.loads(request.content))
+        return httpx.Response(200, text=json.dumps(done))
+
+    return _ollama(handler)
+
+
+def test_ollama_sends_think_to_reasoning_models() -> None:
+    sent: list[dict] = []
+    provider = _ollama_with_capabilities(["completion", "thinking"], sent)
+
+    drain(provider, think=False)
+    drain(provider, think=True)
+
+    assert [body["think"] for body in sent] == [False, True]
+
+
+def test_ollama_leaves_think_out_for_models_that_cannot_reason() -> None:
+    sent: list[dict] = []
+
+    drain(_ollama_with_capabilities(["completion"], sent), think=True)
+
+    assert "think" not in sent[0]
+
+
+def test_ollama_leaves_think_out_when_not_asked() -> None:
+    assert "think" not in OllamaProvider().request_body([Message("user", "hi")])
+
+
+def test_ollama_lists_the_default_model_first_without_duplicates() -> None:
+    from vara.config import Settings
+    from vara.providers.ollama import OllamaProvider
+
+    settings = Settings(ollama_model="qwen3:8b", ollama_models=" qwen3:14b, qwen3:8b ,")
+    assert settings.ollama_model_list == ["qwen3:8b", "qwen3:14b"]
+    provider = OllamaProvider(default_model="qwen3:8b", models=settings.ollama_model_list)
+    assert provider.models == ["qwen3:8b", "qwen3:14b"]
