@@ -16,6 +16,7 @@ from vara.db.database import Database
 from vara.db.models import Conversation, utcnow
 from vara.deals import deal_context
 from vara.deals import parse_request as parse_deal_request
+from vara.documents import DocFormat, document_instructions, requested_format
 from vara.holding import holding_line
 from vara.markets import find_symbols, market_context
 from vara.providers.base import Completed, Message, ProviderError, TextDelta
@@ -111,6 +112,7 @@ class ChatResponse(BaseModel):
     deals: dict | None = None
     price_alerts: list[dict] | None = None
     reasoning: bool | None = None
+    document: dict | None = None
 
 
 def _router(request: Request) -> ModelRouter:
@@ -146,6 +148,8 @@ class _Prepared:
     market_data: list[dict] | None = None
     deals: dict | None = None
     price_alerts: list[dict] | None = None
+    document_format: DocFormat | None = None  # the reply is saved as this kind of file
+    document: dict | None = None
 
 
 SPOKEN_REPLY = (
@@ -202,7 +206,7 @@ def _prepare(request: Request, body: ChatRequest) -> _Prepared:
         memories = (
             store.retrieve_memories(session, new_messages[-1].content) if body.use_memory else []
         )
-        return _Prepared(
+        prepared = _Prepared(
             body=body,
             new_messages=new_messages,
             messages=history + new_messages,
@@ -214,6 +218,12 @@ def _prepare(request: Request, body: ChatRequest) -> _Prepared:
                 mode=body.reasoning or request.app.state.settings.reasoning,
             ),
         )
+    # "Make me a PDF about ...": the reply is written as the document and saved as that file.
+    # Not for spoken requests, whose replies are a sentence or two.
+    if not body.spoken and (fmt := requested_format(new_messages[-1].content)):
+        prepared.document_format = fmt
+        _append_system(prepared, document_instructions(fmt))
+    return prepared
 
 
 WEB_ABILITY = (
@@ -369,6 +379,16 @@ def _persist(request: Request, prepared: _Prepared, reply: str, summary: dict) -
             if conversation is None:  # deleted while the reply was being generated
                 raise HTTPException(409, "Conversation was deleted")
         stored = store.save_exchange(session, conversation, prepared.new_messages, reply, summary)
+        if prepared.document_format and reply.strip():
+            try:
+                saved = request.app.state.documents.create(reply, prepared.document_format)
+            except Exception as exc:  # noqa: BLE001 - the reply is still good without the file
+                logging.getLogger("vara").warning("Couldn't make the document: %s", exc)
+                prepared.document = {"error": "V.A.R.A. couldn't save this as a file"}
+            else:
+                prepared.document = saved.to_dict()
+                store.attach_document(stored, saved.name)
+                logging.getLogger("vara").info("Document made from reply: %s", saved.name)
         return {
             "conversation_id": conversation.id,
             "message_id": stored.id,
@@ -379,6 +399,7 @@ def _persist(request: Request, prepared: _Prepared, reply: str, summary: dict) -
             "deals": prepared.deals,
             "price_alerts": prepared.price_alerts,
             "reasoning": prepared.think,
+            "document": prepared.document,
         }
 
 
@@ -421,6 +442,7 @@ def list_providers(request: Request) -> dict:
     router = _router(request)
     return {
         "privacy_mode": router.privacy_mode,
+        "model_labels": request.app.state.settings.model_labels,
         "providers": [
             {
                 "name": p.name,

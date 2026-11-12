@@ -100,6 +100,12 @@
   .sources summary { cursor: pointer; }
   .sources ol { margin: 4px 0 0; padding-left: 20px; }
   .sources a { color: var(--accent); }
+  .doc-actions { display: flex; gap: 6px; align-items: center; margin-top: 4px; font-size: 12px; color: var(--muted); }
+  .doc-actions button { border: 1px solid var(--border); background: var(--panel); border-radius: 6px; padding: 1px 8px; font-size: 12px; color: var(--muted); }
+  .doc-actions button:hover { border-color: var(--accent); color: var(--text); }
+  .doc-actions a { color: var(--accent); }
+  .doc-files { display: contents; }
+  .doc-file { border: 1px solid var(--accent); border-radius: 6px; padding: 1px 8px; text-decoration: none; font-weight: 600; }
   .deals table { border-collapse: collapse; margin-top: 4px; }
   .deals td { padding: 2px 10px 2px 0; vertical-align: top; }
   .deals td.price { font-weight: 600; color: var(--text); white-space: nowrap; }
@@ -282,7 +288,10 @@ async function loadProviders() {
       for (const model of p.models || [p.default_model]) {
         const opt = document.createElement("option");
         opt.value = model === p.default_model ? p.name : `${p.name}|${model}`;
-        opt.textContent = `${p.name} (${model})${p.local ? "" : " ☁"}`;
+        // A label from VARA_MODEL_LABELS says what the model is for; the tag is shown on hover.
+        const label = data.model_labels?.[model];
+        opt.textContent = (label || `${p.name} (${model})`) + (p.local ? "" : " ☁");
+        opt.title = `${p.name}: ${model}`;
         opt.disabled = !p.local && data.privacy_mode === "local_only";
         select.appendChild(opt);
       }
@@ -320,7 +329,10 @@ async function openConversation(id) {
   state.conversationId = conv.id;
   $("conv-title").textContent = conv.title || "Untitled";
   $("thread").innerHTML = "";
-  for (const m of conv.messages) addMessage(m.role, m.content, m.role === "assistant" ? describe(m) : "");
+  for (const m of conv.messages) {
+    const el = addMessage(m.role, m.content, m.role === "assistant" ? describe(m) : "");
+    if (m.role === "assistant") addDocActions(el, m.content, m.documents, m.id);
+  }
   if (!conv.messages.length) showEmpty();
   markActive();
   $("input").focus();
@@ -415,6 +427,7 @@ async function send(text, confirmCloud = false, existing = null) {
           state.conversationId = data.conversation_id;
           setMessage(replyEl, "assistant", reply, describe({ ...data, output_tokens: data.usage?.output_tokens }));
           if (data.web_search) showSources(replyEl, data.web_search);
+          addDocActions(replyEl, reply, [data.document], data.message_id);
           if (data.deals) showDeals(replyEl, data.deals);
           if (data.price_alerts) clearAlerts(data.price_alerts);
           loadConversations().then(() => {
@@ -498,6 +511,7 @@ function liveDone(data) {
       live.el.querySelector(".bubble").classList.remove("cursor");
       setMessage(live.el, "assistant", data.text ?? live.reply, describe({ ...data, output_tokens: data.usage?.output_tokens }));
       if (data.web_search) showSources(live.el, data.web_search);
+      addDocActions(live.el, data.text ?? live.reply, [data.document], data.message_id);
       if (data.deals) showDeals(live.el, data.deals);
     }
   }
@@ -632,6 +646,49 @@ function showSources(el, search) {
     list.appendChild(li);
   }
   box.appendChild(list);
+  el.appendChild(box);
+}
+
+// Under each reply: its saved Word/PDF files, and "Word" / "PDF" buttons to save it as one.
+// `files` are files already made from it; `messageId` links new ones to it so they show next time.
+function addDocActions(el, text, files = [], messageId = null) {
+  if (!text?.trim()) return;
+  el.querySelector(".doc-actions")?.remove();
+  const box = document.createElement("div");
+  box.className = "doc-actions";
+  box.innerHTML = `<span class="doc-files"></span><span>Save as</span><button type="button" data-fmt="docx">Word</button><button type="button" data-fmt="pdf">PDF</button><span class="doc-status"></span>`;
+  const list = box.querySelector(".doc-files");
+  const status = box.querySelector(".doc-status");
+  const showFile = (doc) => {
+    if (!doc) return;
+    if (doc.error) { status.textContent = doc.error; return; }
+    const a = document.createElement("a");
+    a.href = doc.url;
+    a.download = doc.name;
+    a.className = "doc-file";
+    a.title = doc.name;
+    a.textContent = `⬇ ${doc.format === "pdf" ? "PDF" : "Word"}`;
+    list.appendChild(a);
+  };
+  for (const button of box.querySelectorAll("button")) {
+    button.onclick = async () => {
+      status.textContent = "Saving…";
+      // A conversation's title is a better document title than "Document" when the reply has none.
+      const convTitle = $("conv-title").textContent;
+      const title = /^\s*#\s/.test(text) || !convTitle || convTitle === "New chat" ? null : convTitle;
+      try {
+        const doc = await api("/v1/documents", {
+          method: "POST", body: JSON.stringify({ markdown: text, format: button.dataset.fmt, title, message_id: messageId }),
+        });
+        status.textContent = "";
+        showFile(doc);
+        location.href = doc.url;
+      } catch (err) {
+        status.textContent = `Couldn't save: ${err.message}`;
+      }
+    };
+  }
+  for (const doc of files || []) showFile(doc);
   el.appendChild(box);
 }
 

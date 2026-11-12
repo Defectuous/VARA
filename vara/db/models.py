@@ -42,6 +42,8 @@ class StoredMessage(Base):
     input_tokens: Mapped[int | None]
     output_tokens: Mapped[int | None]
     cost_usd: Mapped[float | None]
+    # Word and PDF files made from this message: a JSON list of names in data/documents.
+    documents: Mapped[str | None] = mapped_column(Text)
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
 

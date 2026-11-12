@@ -31,7 +31,7 @@ $taskName = "V.A.R.A."
 # Pick up VARA_* settings from .env (the backend reads it too); real environment variables win.
 $envFile = Join-Path $root ".env"
 if (Test-Path $envFile) {
-    foreach ($line in Get-Content $envFile) {
+    foreach ($line in Get-Content $envFile -Encoding UTF8) {
         if ($line -match '^\s*(VARA_[A-Z0-9_]+)\s*=\s*(.*?)\s*$') {
             $name = $Matches[1]
             $value = $Matches[2].Trim('"', "'")

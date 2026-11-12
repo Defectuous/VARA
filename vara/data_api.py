@@ -44,7 +44,12 @@ def get_conversation(conversation_id: int, request: Request) -> dict:
         conversation = session.get(Conversation, conversation_id)
         if conversation is None:
             raise HTTPException(404, "Conversation not found")
-        return store.conversation_dict(conversation, with_messages=True)
+        data = store.conversation_dict(conversation, with_messages=True)
+    # Leave out files that have since been deleted.
+    documents = request.app.state.documents
+    for message in data["messages"]:
+        message["documents"] = [d for d in message["documents"] if documents.path(d["name"])]
+    return data
 
 
 @data.patch("/conversations/{conversation_id}")

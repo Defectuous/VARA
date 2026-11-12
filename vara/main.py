@@ -14,6 +14,8 @@ from vara.data_api import data
 from vara.db.database import Database
 from vara.deals import DealFinder
 from vara.deals_api import deals as deals_routes
+from vara.documents import DocumentStore
+from vara.documents_api import documents as documents_routes
 from vara.events import EventBus
 from vara.google_docs import GoogleDocsClient
 from vara.markets import MarketData
@@ -155,6 +157,7 @@ def create_app(
     app.state.synthesizer = synthesizer or KokoroSynthesizer(
         settings.kokoro_model_path, settings.kokoro_voices_path
     )
+    app.state.documents = DocumentStore(settings.documents_dir)
     app.state.search_service = search_service
     app.state.events = EventBus()
     if settings.web_search == "off":
@@ -185,4 +188,5 @@ def create_app(
     app.include_router(voice)
     app.include_router(web)
     app.include_router(deals_routes)
+    app.include_router(documents_routes)
     return app

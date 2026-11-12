@@ -35,6 +35,7 @@ def test_chat_returns_answer_and_which_model_answered() -> None:
         "deals": None,
         "price_alerts": None,
         "reasoning": False,
+        "document": None,
     }
 
 
@@ -291,3 +292,11 @@ def test_providers_endpoint_defaults_models_to_the_default_model() -> None:
     body = client.get("/v1/providers").json()
 
     assert body["providers"][0]["models"] == ["local-model"]
+
+
+def test_providers_endpoint_includes_model_labels() -> None:
+    labels = {"local-model": "Local · general"}
+    router = ModelRouter([FakeProvider("local")], PrivacyMode.LOCAL_ONLY)
+    client = TestClient(create_app(Settings(_env_file=None, model_labels=labels), router=router))
+
+    assert client.get("/v1/providers").json()["model_labels"] == labels

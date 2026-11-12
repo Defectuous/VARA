@@ -42,7 +42,9 @@ class Settings(BaseSettings):
     API keys do not belong here; they live in the OS credential store.
     """
 
-    model_config = SettingsConfigDict(env_prefix="VARA_", env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_prefix="VARA_", env_file=".env", env_file_encoding="utf-8", extra="ignore"
+    )
 
     environment: Environment = Environment.DEVELOPMENT
     host: str = "127.0.0.1"
@@ -70,6 +72,9 @@ class Settings(BaseSettings):
     # `ollama_model` stays the default; only one model fits in GPU memory at a time, so switching
     # between them reloads the model (about a minute).
     ollama_models: str = ""
+    # What each model is called in the Model menu and what it's good at, as JSON, e.g.
+    # {"qwen3:14b": "Qwen3 14B · general, reasoning"}. Models without a label show their tag.
+    model_labels: dict[str, str] = {}
     # How long Ollama keeps the model in GPU memory after a request ("-1" keeps it loaded).
     # Loading it again takes over a minute on the RTX 5060.
     ollama_keep_alive: str = "2h"
@@ -110,6 +115,11 @@ class Settings(BaseSettings):
     @property
     def database_path(self) -> Path:
         return self.data_dir / "vara.db"
+
+    @property
+    def documents_dir(self) -> Path:
+        """Word and PDF documents V.A.R.A. has made (vara/documents.py)."""
+        return self.data_dir / "documents"
 
     @property
     def searxng_dir(self) -> Path:

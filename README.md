@@ -26,6 +26,19 @@ The chat page streams replies, keeps your conversation history in the sidebar, l
 (or *Auto*), and shows the privacy mode. Cloud models are greyed out in *Local only* mode. In *Ask* mode
 it asks before anything goes to a cloud model. It uses only the public API, like the future apps will.
 
+### Word and PDF documents
+
+Every reply has **Save as Word / PDF** buttons. Asking for a file in chat ("make me a PDF about ...",
+"write that up as a Word doc") has the model write the whole document, and the reply comes with a
+download link. Files are saved only in `data\documents`; a leading `# Heading` becomes the title.
+
+| Endpoint | What it does |
+| --- | --- |
+| `POST /v1/documents` | `{"markdown": "...", "format": "docx" or "pdf", "title": optional}` makes a file |
+| `GET /v1/documents` | Lists the files made so far |
+| `GET /v1/documents/{name}` | Downloads one |
+| `DELETE /v1/documents/{name}` | Deletes one |
+
 ## Setup
 
 Install Python 3.12 with `uv` and sync the project environment:
@@ -70,6 +83,7 @@ Settings come from `VARA_*` environment variables or a local `.env` file (never 
 | `VARA_HOLD_NOTICE_SECONDS` | `6` | When a reply hasn't started after this long (a model loading, long reasoning, a web search), V.A.R.A. says it's going to take a minute (in her own snarky way when a personality is set), in the chat page and out loud. `0` turns it off |
 | `VARA_HOLD_REPEAT_SECONDS` | `120` | After that, "still working on it" this often until the reply starts. `0` for just the one notice |
 | `VARA_OLLAMA_MODELS` | (none) | More Ollama models for the chat page's Model menu, comma-separated (e.g. `qwen3:14b`). Switching models reloads it into GPU memory, so the first reply after a switch is slower |
+| `VARA_MODEL_LABELS` | (none) | What each model is called in the Model menu and what it's good at, as JSON: `{"qwen3:14b": "Qwen3 14B · general, reasoning"}`. Unlabelled models show their tag |
 | `VARA_OLLAMA_KEEP_ALIVE` | `2h` | How long the model stays in GPU memory after a request; `-1` keeps it loaded. Reloading takes about a minute |
 | `VARA_REASONING` | `auto` | For models that can reason (e.g. qwen3). `auto` decides per message: small talk and quick facts answer straight away, while "why"/"explain"/compare/plan/code/maths questions and long messages reason first (spoken replies reason only for clearly hard ones). `on`/`off` force it; a request's `reasoning` overrides this |
 | `VARA_SYSTEM_PROMPT` | V.A.R.A. persona | Used when a request has no `system` of its own; `{date}` becomes today's date. A request's `system` replaces it (`""` sends none) |

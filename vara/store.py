@@ -1,3 +1,4 @@
+import json
 import re
 from collections.abc import Sequence
 
@@ -134,6 +135,15 @@ def usage_summary(session: Session) -> list[dict]:
     return [{**dict(zip(keys, row[:6], strict=True)), "unpriced_requests": row[6]} for row in rows]
 
 
+def message_documents(m: StoredMessage) -> list[str]:
+    return json.loads(m.documents) if m.documents else []
+
+
+def attach_document(m: StoredMessage, name: str) -> None:
+    """Remember that the file `name` (in data/documents) was made from this message."""
+    m.documents = json.dumps([*message_documents(m), name])
+
+
 def message_dict(m: StoredMessage) -> dict:
     return {
         "id": m.id,
@@ -145,6 +155,10 @@ def message_dict(m: StoredMessage) -> dict:
         "input_tokens": m.input_tokens,
         "output_tokens": m.output_tokens,
         "cost_usd": m.cost_usd,
+        "documents": [
+            {"name": n, "format": n.rsplit(".", 1)[-1], "url": f"/v1/documents/{n}"}
+            for n in message_documents(m)
+        ],
     }
 
 
