@@ -64,6 +64,9 @@
   }
   #menu { display: none; border: 0; background: transparent; font-size: 20px; padding: 0 4px; }
   header .spacer { flex: 1; }
+  #conv-title { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  header label { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  #provider { max-width: 240px; }
   .badge {
     font-size: 12px; padding: 2px 10px; border-radius: 999px; border: 1px solid currentColor;
     white-space: nowrap;
@@ -118,6 +121,28 @@
   .alert a { color: var(--accent); }
   .alert .grow { flex: 1; }
   .alert button { border: 0; background: transparent; color: var(--muted); }
+  /* Agent: the steps under a reply, approval cards above the composer, the header switches */
+  .steps { list-style: none; margin: 6px 0 0; padding: 0; font-size: 12px; color: var(--muted); }
+  .steps li { padding: 1px 0; }
+  .steps li.failed, .steps li.rejected, .steps li.expired, .steps li.timed_out { color: var(--danger); }
+  .steps li.awaiting_approval { color: var(--warn); font-weight: 600; }
+  #approvals { padding: 0 20px; display: flex; flex-direction: column; gap: 8px; }
+  #approvals:empty { display: none; }
+  .approval {
+    max-width: 780px; width: 100%; margin: 0 auto; padding: 10px 12px; border-radius: 10px;
+    border: 1px solid var(--warn); background: var(--panel); font-size: 14px;
+  }
+  .approval .what { font-weight: 600; margin: 2px 0 4px; }
+  .approval .why { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+  .approval .row { display: flex; gap: 8px; align-items: center; margin-top: 8px; }
+  .approval input { flex: 1; min-width: 0; border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; background: var(--bg); color: var(--text); font: inherit; font-size: 13px; }
+  .approval button { border-radius: 8px; padding: 4px 14px; font-weight: 600; border: 1px solid var(--border); background: var(--panel); }
+  .approval button.yes { background: var(--ok); border-color: var(--ok); color: var(--accent-text); }
+  .approval button.no:hover { border-color: var(--danger); color: var(--danger); }
+  .approval button:disabled { opacity: .5; cursor: default; }
+  .switch { display: flex; align-items: center; gap: 6px; font-size: 13px; white-space: nowrap; cursor: pointer; }
+  #pause { border: 1px solid var(--border); background: transparent; border-radius: 999px; font-size: 12px; padding: 2px 10px; white-space: nowrap; }
+  #pause.on { color: var(--danger); border-color: var(--danger); }
   .cursor::after { content: "▍"; animation: blink 1s steps(1) infinite; color: var(--muted); }
   @keyframes blink { 50% { opacity: 0; } }
   .empty { text-align: center; color: var(--muted); margin-top: 18vh; }
@@ -149,7 +174,8 @@
     }
     body.nav-open aside { transform: none; box-shadow: 0 0 30px rgba(0,0,0,.3); }
     #menu { display: block; }
-    #messages, form, header { padding-left: 16px; padding-right: 16px; }
+    #messages, form, header, #approvals { padding-left: 16px; padding-right: 16px; }
+    header { flex-wrap: wrap; row-gap: 6px; }
   }
 </style>
 </head>
@@ -164,12 +190,15 @@
     <button id="menu" type="button" aria-label="Conversations">☰</button>
     <span id="conv-title">New chat</span>
     <span class="spacer"></span>
+    <label class="switch" title="Let V.A.R.A. use tools (search, quotes, prices, memory). Anything that changes something asks you first."><input type="checkbox" id="use-tools"> Tools</label>
+    <button id="pause" type="button" title="Stop every agent run now and refuse new ones until resumed">Pause agent</button>
     <label>Model
       <select id="provider"><option value="">Auto</option></select>
     </label>
     <span id="privacy" class="badge" title="Privacy mode">…</span>
   </header>
   <div id="messages"><div id="alerts" aria-live="polite"></div><div class="thread" id="thread"></div></div>
+  <div id="approvals" aria-live="polite"></div>
   <form id="composer">
     <div class="composer">
       <textarea id="input" rows="1" placeholder="Message V.A.R.A." autofocus></textarea>
@@ -180,7 +209,7 @@
 <script>
 "use strict";
 const $ = (id) => document.getElementById(id);
-const state = { conversationId: null, privacyMode: null, streaming: null, live: null };
+const state = { conversationId: null, privacyMode: null, streaming: null, live: null, run: null, agentPaused: false };
 // Sent with every request; live events carrying it are this page's own and are skipped.
 const CLIENT_ID = "page-" + (crypto.randomUUID ? crypto.randomUUID() : String(Math.random()).slice(2));
 
@@ -554,6 +583,9 @@ function connectLive() {
   on("exchange_done", liveDone);
   on("exchange_failed", liveFailed);
   source.addEventListener("price_alert", (e) => showAlert(JSON.parse(e.data)));
+  for (const name of ["agent_run_started", "agent_delta", "agent_action", "approval_requested", "agent_run_finished", "agent_paused"]) {
+    source.addEventListener(name, (e) => agentEvent(name, JSON.parse(e.data)));
+  }
   let dropped = false;
   source.onerror = () => { dropped = true; }; // EventSource reconnects by itself
   source.onopen = () => {
@@ -563,6 +595,7 @@ function connectLive() {
     state.live = null;
     loadProviders();
     loadConversations();
+    loadAgent();
     if (state.conversationId !== null && !state.streaming) openConversation(state.conversationId).catch(() => {});
   };
 }
@@ -699,6 +732,219 @@ function addDocActions(el, text, files = [], messageId = null) {
   el.appendChild(box);
 }
 
+// ---------- Agent: tools, steps, approvals ----------
+// With Tools on, a message starts an agent run (POST /v1/agent/runs). Its progress arrives on /v1/events:
+// text (agent_delta), each tool it asks for (agent_action), approvals (approval_requested), and the end
+// (agent_run_finished). Events can arrive before the POST returns the run's id, so they are held until
+// then. A slow poll catches the end if the live connection drops.
+const STEP_ICONS = {
+  running: "⋯", succeeded: "✓", duplicate: "↺", awaiting_approval: "⏳", invalid: "✕", failed: "✕",
+  rejected: "✕", expired: "✕", timed_out: "✕", cancelled: "✕",
+};
+const STEP_NOTES = {
+  awaiting_approval: "waiting for your approval", rejected: "you declined", expired: "approval expired",
+  invalid: "refused", failed: "failed", timed_out: "took too long", cancelled: "cancelled", duplicate: "already done",
+};
+
+async function runAgent(text, confirmCloud = false, existing = null) {
+  const [provider = null, model = null] = ($("provider").value || "").split("|").map((v) => v || null);
+  const userEl = existing || addMessage("user", text);
+  const el = addMessage("assistant", "", "");
+  el.querySelector(".bubble").classList.add("cursor");
+  const run = { id: null, el, text, userEl, confirmCloud, step: 0, reply: "", held: [], done: false };
+  state.run = run;
+  state.streaming = { abort: () => cancelRun(run) };
+  setSending(true);
+  try {
+    const started = await api("/v1/agent/runs", {
+      method: "POST",
+      body: JSON.stringify({
+        goal: text, conversation_id: state.conversationId, provider, model, confirm_cloud: confirmCloud,
+        client: CLIENT_ID, client_time: localIsoTime(), client_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      }),
+    });
+    run.id = started.id;
+    for (const [name, data] of run.held.splice(0)) agentEvent(name, data);
+    pollRun(run);
+  } catch (err) {
+    endRun(run);
+    if (err.status === 404 && state.conversationId !== null) {
+      // The conversation was deleted elsewhere: continue in a new one.
+      el.remove();
+      state.conversationId = null;
+      $("conv-title").textContent = "New chat";
+      markActive();
+      return runAgent(text, confirmCloud, userEl);
+    }
+    el.className = "msg error";
+    const paused = err.status === 409 && /paused/i.test(err.message);
+    if (paused) showPaused(true);
+    setMessage(el, "error", paused ? "The agent is paused. Resume it (top right) to use tools." : friendly(err.message), "");
+  }
+}
+
+function endRun(run) {
+  run.done = true;
+  run.el.querySelector(".bubble").classList.remove("cursor");
+  if (state.run === run) state.run = null;
+  state.streaming = null;
+  setSending(false);
+  $("input").focus();
+}
+
+async function cancelRun(run) {
+  if (run.id === null) return;
+  try { await api(`/v1/agent/runs/${run.id}/cancel`, { method: "POST" }); } catch {}
+}
+
+async function pollRun(run) {
+  while (!run.done) {
+    await new Promise((r) => setTimeout(r, 3000));
+    if (run.done) return;
+    try {
+      const data = await api(`/v1/agent/runs/${run.id}`);
+      if (data.status !== "running") finishRun(run, data);
+    } catch {}
+  }
+}
+
+// Each tool the run asked for, under the reply, updated as its status changes.
+function showStep(run, action) {
+  let list = run.el.querySelector(".steps");
+  if (!list) {
+    list = document.createElement("ul");
+    list.className = "steps";
+    run.el.querySelector(".meta").before(list);
+  }
+  let li = list.querySelector(`[data-action="${action.id}"]`);
+  if (!li) {
+    li = document.createElement("li");
+    li.dataset.action = action.id;
+    list.appendChild(li);
+  }
+  li.className = action.status;
+  const note = STEP_NOTES[action.status];
+  li.textContent = `${STEP_ICONS[action.status] || "•"} ${action.description || action.action}` + (note ? ` (${note})` : "");
+  li.title = action.error || "";
+}
+
+function finishRun(run, data) {
+  if (run.done) return;
+  // Ask mode with no local model: the run ends asking for confirmation, as chat does.
+  if (data.status === "failed" && /needs confirmation/.test(data.error || "") && !run.confirmCloud) {
+    endRun(run);
+    run.el.remove();
+    if (confirm("No local model could answer. Send this to a cloud model?")) return runAgent(run.text, true, run.userEl);
+    addMessage("error", "Not sent: cloud use was declined.");
+    return;
+  }
+  for (const a of data.actions || []) showStep(run, a);
+  const count = data.actions?.length || 0;
+  const tools = count ? `${count} tool${count === 1 ? "" : "s"}` : "";
+  const answeredBy = data.provider ? `${data.provider}${data.model ? " · " + data.model : ""}` : "";
+  if (data.final_text) {
+    const meta = [answeredBy, tools, data.status === "stopped" ? data.error : ""].filter(Boolean).join(" · ");
+    setMessage(run.el, "assistant", data.final_text, meta);
+    addDocActions(run.el, data.final_text);
+  } else {
+    run.el.className = "msg error";
+    const why = data.status === "cancelled" ? data.error || "Stopped" : friendly(data.error || data.status);
+    setMessage(run.el, "error", `${why}. Nothing was saved.`, tools);
+  }
+  if (data.conversation_id) state.conversationId = data.conversation_id;
+  endRun(run);
+  loadConversations().then(() => {
+    markActive();
+    const li = $("conversations").querySelector(`[data-id="${state.conversationId}"] .title`);
+    if (li) $("conv-title").textContent = li.textContent;
+  });
+}
+
+// Every agent event from /v1/events. Approval cards are for any run (another tab, the voice listener);
+// steps and text only for this page's own run.
+function agentEvent(name, data) {
+  if (name === "approval_requested") showApproval(data);
+  if (name === "agent_action" && data.status !== "awaiting_approval") dropApproval(data.id);
+  if (name === "agent_paused") { showPaused(data.paused); return; }
+  const run = state.run;
+  if (!run || run.done) return;
+  if (run.id === null) { run.held.push([name, data]); return; }
+  const runId = name.startsWith("agent_run") ? data.id : data.run_id;
+  if (runId !== run.id) return;
+  if (name === "agent_delta") {
+    // Text from an earlier step (before it used a tool) is replaced by the next step's.
+    if (data.step !== run.step) { run.step = data.step; run.reply = ""; }
+    run.reply += data.text;
+    setMessage(run.el, "assistant", run.reply, data.provider);
+    scrollDown();
+  } else if (name === "agent_action" || name === "approval_requested") {
+    showStep(run, data);
+    scrollDown();
+  } else if (name === "agent_run_finished") {
+    // The full record has every action, so the steps end up complete.
+    api(`/v1/agent/runs/${run.id}`).then((full) => finishRun(run, full)).catch(() => finishRun(run, data));
+  }
+}
+
+function showApproval(a) {
+  if ($("approvals").querySelector(`[data-approval="${a.id}"]`)) return;
+  const card = document.createElement("div");
+  card.className = "approval";
+  card.dataset.approval = a.id;
+  const risk = {
+    local_change: "changes V.A.R.A.'s data on this PC", external_effect: "does something outside this PC", financial: "involves money",
+  }[a.risk] || a.risk;
+  card.innerHTML = `<div class="why">V.A.R.A. wants to do this (${escapeHtml(risk)}):</div><div class="what"></div>` +
+    `<div class="why args"></div><div class="row"><input type="text" placeholder="Note (optional)" maxlength="500">` +
+    `<button type="button" class="no">Reject</button><button type="button" class="yes">Approve</button></div>`;
+  card.querySelector(".what").textContent = a.description || a.action;
+  card.querySelector(".args").textContent = `${a.action} ${JSON.stringify(a.arguments)}`;
+  const decide = async (decision) => {
+    for (const b of card.querySelectorAll("button")) b.disabled = true;
+    const note = card.querySelector("input").value.trim() || null;
+    try {
+      await api(`/v1/agent/approvals/${a.id}`, { method: "POST", body: JSON.stringify({ decision, note }) });
+      card.remove();
+    } catch (err) {
+      // Already decided elsewhere, expired, or its run was stopped.
+      card.querySelector(".why").textContent = err.status === 409 ? "This is no longer waiting for an answer." : `Couldn't send: ${err.message}`;
+      setTimeout(() => card.remove(), 4000);
+    }
+  };
+  card.querySelector(".yes").onclick = () => decide("approve");
+  card.querySelector(".no").onclick = () => decide("reject");
+  $("approvals").appendChild(card);
+}
+
+function dropApproval(id) {
+  $("approvals").querySelector(`[data-approval="${id}"]`)?.remove();
+}
+
+function showPaused(paused) {
+  state.agentPaused = paused;
+  const btn = $("pause");
+  btn.textContent = paused ? "Agent paused · Resume" : "Pause agent";
+  btn.classList.toggle("on", paused);
+}
+
+async function loadAgent() {
+  try {
+    showPaused((await api("/v1/agent/status")).paused);
+    $("approvals").innerHTML = "";
+    for (const a of (await api("/v1/agent/approvals")).approvals) showApproval(a);
+  } catch {}
+}
+
+$("pause").onclick = async () => {
+  const resume = state.agentPaused;
+  if (!resume && !confirm("Stop every agent run now and refuse new ones until you resume?")) return;
+  try {
+    showPaused((await api(resume ? "/v1/agent/resume" : "/v1/agent/pause", { method: "POST" })).paused);
+  } catch (err) { alert(`Couldn't change it: ${err.message}`); }
+};
+try { $("use-tools").checked = localStorage.getItem("vara.tools") === "on"; } catch {}
+$("use-tools").onchange = (e) => { try { localStorage.setItem("vara.tools", e.target.checked ? "on" : "off"); } catch {} };
+
 // Local time with its UTC offset, e.g. 2026-11-05T07:04:00-05:00 (toISOString would give UTC).
 function localIsoTime() {
   const d = new Date();
@@ -729,7 +975,8 @@ $("composer").addEventListener("submit", (e) => {
   if (!text) return;
   input.value = "";
   autosize();
-  send(text);
+  if ($("use-tools").checked) runAgent(text);
+  else send(text);
 });
 
 $("input").addEventListener("keydown", (e) => {
@@ -753,6 +1000,7 @@ showEmpty();
 loadProviders();
 loadConversations();
 loadAlerts();
+loadAgent();
 connectLive();
 </script>
 </body>

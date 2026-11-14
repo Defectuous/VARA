@@ -460,7 +460,12 @@ Live progress appears on `/v1/events`: `agent_run_started`, `agent_delta`, `agen
 `approval_requested`, `agent_run_finished`, and `agent_paused`. A run or approval left open when the server
 stops is closed as `interrupted` or `expired` the next time it starts.
 
-The chat page doesn't use the agent yet; chat still runs its own search and price-check steps.
+In the chat page, turn on **Tools** (top right; remembered per browser) to send messages to the agent
+instead of plain chat. Each tool V.A.R.A. uses is listed under her reply as it runs (✓ done, ⏳ waiting for
+you, ✕ declined or failed). When an action needs your approval, a card appears above the message box with
+exactly what it will do and its arguments: **Approve** or **Reject**, with an optional note. Cards appear for
+any run, including ones started from another window. **Pause agent** is the pause switch; **Stop** cancels
+the run in progress. With Tools off, chat works as before, with its own search and price-check steps.
 
 ## Answer-quality evals
 

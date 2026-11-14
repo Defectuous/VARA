@@ -505,7 +505,10 @@ class AgentManager:
                         ActionStatus.REJECTED,
                         decided_at=utcnow(),
                         decision_note=note,
-                        result=f"The user declined this{reason}, so it was not done.",
+                        result=(
+                            f"The user declined this{reason}, so it was not done and will not be. "
+                            "Say so plainly; don't offer to do it anyway."
+                        ),
                     )
                 self._update_record(
                     record_id, decided_at=utcnow(), decision_note=note, permission="approved"
