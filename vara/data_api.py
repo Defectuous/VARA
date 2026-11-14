@@ -70,6 +70,10 @@ def delete_conversation(conversation_id: int, request: Request) -> Response:
         if conversation is None:
             raise HTTPException(404, "Conversation not found")
         session.delete(conversation)
+    # Open chat pages drop it from their sidebar (and leave it, if it was the open one).
+    bus = getattr(request.app.state, "events", None)
+    if bus is not None:
+        bus.publish("conversation_deleted", {"conversation_id": conversation_id})
     return Response(status_code=204)
 
 

@@ -315,7 +315,8 @@ async function loadConversations() {
     li.classList.toggle("active", c.id === state.conversationId);
     li.innerHTML = `<span class="title"></span><button class="del" type="button" title="Delete">✕</button>`;
     li.querySelector(".title").textContent = c.title || "Untitled";
-    li.onclick = () => openConversation(c.id);
+    // If it's gone (deleted elsewhere), refreshing the list drops it.
+    li.onclick = () => openConversation(c.id).catch(() => loadConversations());
     li.querySelector(".del").onclick = (e) => { e.stopPropagation(); deleteConversation(c); };
     ul.appendChild(li);
   }
@@ -539,7 +540,13 @@ function connectLive() {
   const on = (name, handler) => source.addEventListener(name, (e) => {
     const data = JSON.parse(e.data);
     if (data.client === CLIENT_ID) return; // this page's own exchange
+    if (data.client === "vara-eval") return; // `python -m vara eval` test questions, deleted right after
     handler(data);
+  });
+  source.addEventListener("conversation_deleted", (e) => {
+    const { conversation_id } = JSON.parse(e.data);
+    if (conversation_id === state.conversationId && !state.streaming) newChat();
+    loadConversations();
   });
   on("exchange_started", liveStarted);
   on("exchange_delta", liveDelta);

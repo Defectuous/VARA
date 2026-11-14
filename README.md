@@ -423,6 +423,35 @@ A backup can be taken while the server is running. Store copies off this PC, and
 
 Keep the service bound to localhost until device authentication is implemented.
 
+## Answer-quality evals
+
+`pytest` checks the code; the evals check the answers. With V.A.R.A. running:
+
+```powershell
+uv run python -m vara eval                          # every case, for each model in VARA_EVAL_MODELS
+uv run python -m vara eval --model qwen3:14b        # one model (repeatable)
+uv run python -m vara eval --category logic         # one category (repeatable); --case <id> for one case
+uv run python -m vara eval --offline                # skip the cases that need live web search
+uv run python -m vara eval --list                   # show the cases
+```
+
+The cases are in `vara/eval_cases.toml`: math, logic and trick questions, code, science, following
+formatting instructions, saying "I don't know" instead of inventing, current events (live web search),
+whether *auto* reasoning thinks when it should, and short spoken replies. Each has an answer checked
+automatically (a number, words that must or must not appear, word counts, whether it searched or
+reasoned). Questions go through `/v1/chat` like any client, without your memories, and the test
+conversations are deleted afterwards (`--keep` keeps them).
+
+Each run is saved in `data/evals/runs/` with every reply, and a summary line is added to
+`data/evals/history.jsonl` with the model's Ollama digest. The next run of the same model is compared
+with it: the score change, which cases newly fail or pass, and whether the model itself was updated in
+between. The command exits with 1 when a model scored lower than last time. Web cases also list the
+search engines that didn't answer, since a blocked engine can fail them.
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `VARA_EVAL_MODELS` | the default model | Comma-separated Ollama models to test |
+
 ## Credits
 
 Special thanks to Duckie (he knows who he is) for his insightful ideas and testing.

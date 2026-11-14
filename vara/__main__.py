@@ -8,7 +8,7 @@ from pathlib import Path
 
 import uvicorn
 
-from vara import access, google_cli, setup_wizard
+from vara import access, evals, google_cli, setup_wizard
 from vara.backup import backup_database, restore_database
 from vara.config import get_settings
 from vara.credentials import delete_secret, set_secret
@@ -42,6 +42,62 @@ def serve() -> None:
     )
 
 
+def run_evals(settings, args) -> int:
+    """Run the eval cases for each model; 1 if any model scored lower than its previous run."""
+    logging.getLogger("httpx").setLevel(
+        logging.WARNING
+    )  # one line per request would bury the results
+    cases = evals.load_cases()
+    if args.category:
+        cases = [c for c in cases if c.category in args.category]
+    if args.case:
+        cases = [c for c in cases if c.id in args.case]
+    if args.offline:
+        cases = [c for c in cases if not c.request.get("web_search")]
+    if args.list:
+        for c in cases:
+            print(f"{c.category:<10} {c.id}")
+        return 0
+    if not cases:
+        print("No eval cases match.")
+        return 2
+
+    runner = evals.EvalRunner(f"http://127.0.0.1:{settings.port}", settings.evals_dir)
+    try:
+        runner.check_backend()
+    except RuntimeError as exc:
+        print(exc)
+        return 2
+    worse = False
+    for model in args.model or settings.eval_model_list:
+        print(f"\n{model}: {len(cases)} cases")
+        results = []
+        for case in cases:
+            result = runner.run_case(case, model, keep=args.keep)
+            results.append(result)
+            mark = "pass" if result.passed else "FAIL"
+            why = f"  ({'; '.join(result.failures)})" if result.failures else ""
+            print(f"  {mark}  {case.id:<28} {result.seconds:>6.1f}s{why}", flush=True)
+        previous = runner.previous(model, {c.id for c in cases})
+        summary = runner.save(model, runner.model_digest(settings.ollama_url, model), results)
+        change = evals.compare(previous, summary)
+        print(f"  Score: {summary['passed']}/{summary['total']} ({summary['score']}%)")
+        print("  By category: " + ", ".join(f"{k} {v}" for k, v in summary["by_category"].items()))
+        if change["delta"] is not None:
+            note = " (the model itself changed)" if change["model_changed"] else ""
+            print(f"  Since last run: {change['delta']:+} points{note}")
+            if change["regressed"]:
+                print("  Newly failing: " + ", ".join(change["regressed"]))
+            if change["fixed"]:
+                print("  Newly passing: " + ", ".join(change["fixed"]))
+            worse = worse or change["delta"] < 0
+        blocked = sorted({e for r in results for e in r.unresponsive_engines})
+        if blocked:
+            print("  Search engines that didn't answer: " + ", ".join(blocked))
+    print(f"\nFull results: {settings.evals_dir / 'runs'}")
+    return 1 if worse else 0
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="vara", description="V.A.R.A. backend")
     commands = parser.add_subparsers(dest="command")
@@ -59,6 +115,23 @@ def main() -> None:
     search.add_argument("action", choices=["install", "update", "status"])
     deals = commands.add_parser("deals", help="store or remove the optional Best Buy API key")
     deals.add_argument("action", choices=["bestbuy-key", "remove-bestbuy-key"])
+    evaluate = commands.add_parser(
+        "eval", help="grade the models' answers on a fixed question set (needs V.A.R.A. running)"
+    )
+    evaluate.add_argument(
+        "--model",
+        action="append",
+        help="Ollama model to test (repeatable; default VARA_EVAL_MODELS)",
+    )
+    evaluate.add_argument("--category", action="append", help="only these categories (repeatable)")
+    evaluate.add_argument("--case", action="append", help="only these case ids (repeatable)")
+    evaluate.add_argument(
+        "--offline", action="store_true", help="skip cases that need live web search"
+    )
+    evaluate.add_argument(
+        "--keep", action="store_true", help="keep the test conversations in the chat history"
+    )
+    evaluate.add_argument("--list", action="store_true", help="list the cases and exit")
     args = parser.parse_args()
 
     settings = get_settings()
@@ -126,6 +199,8 @@ def main() -> None:
         else:
             delete_secret("bestbuy")
             log.info("Best Buy key removed")
+    elif args.command == "eval":
+        raise SystemExit(run_evals(settings, args))
     else:
         serve()
 

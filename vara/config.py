@@ -106,6 +106,15 @@ class Settings(BaseSettings):
     anthropic_model: str = "claude-opus-5-5"
     anthropic_effort: str = "medium"
 
+    # Ollama models `python -m vara eval` tests when none are named, comma-separated. Empty tests
+    # only `ollama_model`.
+    eval_models: str = ""
+
+    @property
+    def eval_model_list(self) -> list[str]:
+        models = [m.strip() for m in self.eval_models.split(",") if m.strip()]
+        return list(dict.fromkeys(models)) or [self.ollama_model]
+
     @property
     def ollama_model_list(self) -> list[str]:
         """The default Ollama model first, then the extra ones, without duplicates."""
@@ -120,6 +129,11 @@ class Settings(BaseSettings):
     def documents_dir(self) -> Path:
         """Word and PDF documents V.A.R.A. has made (vara/documents.py)."""
         return self.data_dir / "documents"
+
+    @property
+    def evals_dir(self) -> Path:
+        """Eval runs and their score history (vara/evals.py)."""
+        return self.data_dir / "evals"
 
     @property
     def searxng_dir(self) -> Path:

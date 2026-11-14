@@ -1,0 +1,295 @@
+# Eval cases for `python -m vara eval` (vara/evals.py). Each case is one question with checks that
+# grade the reply; a case passes only if every check passes. Checks (text matching ignores case):
+#   expect_all / expect_any / reject_any   strings that must all / at least one / none appear
+#   expect_regex / reject_regex             patterns that must / must not match
+#   expect_number                           a number that must appear (commas ignored)
+#   max_words, line_word_counts, first_letters, no_markdown
+#   expect_search, expect_reasoning         whether a web search ran / the model reasoned
+# Request options: web_search (default false), reasoning ("auto"/"on"/"off"; unset uses V.A.R.A.'s
+# setting, as a normal chat would), spoken. Strings may use {month_name}, {day}, {year} for the day
+# of the run.
+#
+# Keep answers unambiguous and stable. "current" cases need live web search and facts newer than
+# the models' training; they can fail when search engines block SearXNG (the run records which
+# engines didn't answer). Changing a case's checks makes its history incomparable, so give a changed
+# case a new id.
+
+# --- math -----------------------------------------------------------------------------------------
+
+[[case]]
+id = "math-mod5-count"
+category = "math"
+question = "How many positive integers n <= 1000 make n^2 + 1 divisible by 5?"
+expect_number = 400
+
+[[case]]
+id = "math-trip-minutes"
+category = "math"
+question = "A train leaves at 9:40 and arrives at 13:15 the same day. How long is the trip, in minutes?"
+expect_number = 215
+
+[[case]]
+id = "math-multiply"
+category = "math"
+question = "What is 17 times 23?"
+expect_number = 391
+
+[[case]]
+id = "math-sum-3-or-5"
+category = "math"
+question = "What is the sum of all integers from 1 to 200 that are divisible by 3 or by 5?"
+expect_number = 9368
+
+[[case]]
+id = "math-discount-original"
+category = "math"
+question = "A shirt costs $40 after a 20% discount. What was the original price?"
+expect_number = 50
+
+# --- logic and trick questions ------------------------------------------------------------------
+
+[[case]]
+id = "logic-alice-sisters"
+category = "logic"
+question = "Alice has 4 brothers and 1 sister. How many sisters does each of Alice's brothers have?"
+expect_regex = ['\b(2|two)\s+sisters\b']
+reject_regex = ['\b(each|brothers?)\b[^.]*\bhas\s+(1|one|only one)\s+sister\b']
+
+[[case]]
+id = "logic-bat-ball"
+category = "logic"
+question = "A bat and a ball cost $1.10 in total. The bat costs $1.00 more than the ball. How much does the ball cost?"
+expect_any = ["$0.05", "5 cents", "five cents", "0.05"]
+
+[[case]]
+id = "logic-widgets"
+category = "logic"
+question = "If 5 machines take 5 minutes to make 5 widgets, how long would 100 machines take to make 100 widgets?"
+expect_regex = ['\b(5|five)\s+minutes\b']
+
+[[case]]
+id = "logic-fifth-daughter"
+category = "logic"
+question = "Mary's father has five daughters: Nana, Nene, Nini, and Nono. What is the fifth daughter's name?"
+expect_any = ["Mary"]
+
+[[case]]
+id = "logic-monty-4-doors"
+category = "logic"
+question = "Monty Hall with 4 doors: one car, three goats. You pick a door. The host, who knows where the car is, opens one other door showing a goat, then lets you switch to one of the two remaining closed doors. What is your chance of winning if you stay, and if you switch? Give exact fractions."
+expect_all = ["1/4", "3/8"]
+
+[[case]]
+id = "logic-directions"
+category = "logic"
+question = "I'm facing north. I turn right, then right again, then left. Which direction am I facing now?"
+expect_regex = ['\beast\b']
+reject_regex = ['facing (north|south|west)\b']
+
+[[case]]
+id = "logic-sheep"
+category = "logic"
+question = "A farmer has 17 sheep. All but 9 die. How many sheep are left?"
+expect_number = 9
+
+# --- code ---------------------------------------------------------------------------------------
+
+[[case]]
+id = "code-binary-search-bugs"
+category = "code"
+question = """Find the bug(s) in this Python and give a fixed version:
+
+def binary_search(a, x):
+    lo, hi = 0, len(a)
+    while lo <= hi:
+        mid = (lo + hi) // 2
+        if a[mid] == x:
+            return mid
+        elif a[mid] < x:
+            lo = mid
+        else:
+            hi = mid - 1
+    return -1"""
+expect_regex = ['lo\s*=\s*mid\s*\+\s*1']
+# The code has no syntax error; claiming one is a hallucination.
+reject_any = ["syntax error"]
+
+[[case]]
+id = "code-float-equality"
+category = "code"
+question = "In Python, what does print(0.1 + 0.2 == 0.3) print?"
+expect_regex = ['\bFalse\b']
+
+[[case]]
+id = "code-list-alias"
+category = "code"
+question = """What does this Python print? Reply with only the output.
+
+x = [1, 2, 3]
+y = x
+y.append(4)
+print(len(x))"""
+expect_regex = ['^\W*4\W*$']
+
+[[case]]
+id = "code-string-times-zero"
+category = "code"
+question = "In Python, what does 'abc' * 0 evaluate to?"
+expect_any = ["''", '""', "empty string"]
+
+[[case]]
+id = "code-sql-having"
+category = "code"
+question = "Which SQL clause filters groups after GROUP BY has been applied?"
+expect_any = ["HAVING"]
+
+# --- science and stable knowledge ---------------------------------------------------------------
+
+[[case]]
+id = "science-mars-sunset"
+category = "science"
+question = "Why are sunsets on Mars blue? Answer in two or three sentences."
+# Fine dust scatters blue light forward, so the blue glow is around the sun itself.
+expect_any = ["dust"]
+expect_regex = ['forward|(around|near|toward|towards|close to) the (setting )?sun|direction of the sun']
+
+[[case]]
+id = "science-tungsten"
+category = "science"
+question = "What is the chemical symbol for tungsten?"
+expect_regex = ['\bW\b']
+
+[[case]]
+id = "science-bones"
+category = "science"
+question = "How many bones are in the adult human body?"
+expect_number = 206
+
+[[case]]
+id = "science-minus-40"
+category = "science"
+question = "What is -40 degrees Celsius in Fahrenheit?"
+expect_regex = ['[-−]\s?40\s*°?\s*(degrees\s*)?F']
+
+[[case]]
+id = "knowledge-le-guin"
+category = "knowledge"
+question = "Who wrote the novel 'The Left Hand of Darkness'?"
+expect_any = ["Le Guin"]
+
+# --- following instructions ---------------------------------------------------------------------
+
+[[case]]
+id = "format-acrostic-vara"
+category = "format"
+question = "Write a 4-line acrostic poem spelling VARA (line 1 starts with V, line 2 with A, line 3 with R, line 4 with A). Every line must be exactly 7 words. Output only the poem."
+first_letters = "VARA"
+line_word_counts = [7, 7, 7, 7]
+
+[[case]]
+id = "format-yes-no"
+category = "format"
+question = "Reply with only the word yes or no: is 91 a prime number?"
+expect_regex = ['^\W*no\W*$']
+
+[[case]]
+id = "format-one-sentence"
+category = "format"
+question = "In one sentence of fewer than 20 words, explain what DNS does."
+max_words = 20
+expect_any = ["IP", "address"]
+
+# --- saying "I don't know" instead of inventing ------------------------------------------------
+
+[[case]]
+id = "abstain-fake-module"
+category = "abstain"
+question = "What does the Python standard library module quantumlist do?"
+expect_any = ["no such", "doesn't exist", "does not exist", "not a standard", "isn't a standard", "not part of", "isn't part of", "not aware", "not familiar", "no module", "don't know", "there is no"]
+
+[[case]]
+id = "abstain-breakfast"
+category = "abstain"
+question = "What did I eat for breakfast yesterday?"
+expect_any = ["don't know", "do not know", "no way", "can't know", "cannot know", "don't have", "no information", "not sure", "haven't told", "didn't tell", "no idea", "can't see", "no record", "not able"]
+
+[[case]]
+id = "abstain-fake-novel"
+category = "abstain"
+question = "Summarize the plot of the 1987 novel 'The Glass Orchard of Venn' by Harold Mirwick."
+expect_any = ["not aware", "couldn't find", "can't find", "unable to find", "don't have", "no record", "not familiar", "doesn't appear", "does not appear", "no information", "don't know", "not able to find", "doesn't seem", "does not seem", "may not exist", "might not exist", "not find"]
+
+# --- current information (live web search) ------------------------------------------------------
+
+[[case]]
+id = "current-world-series-2026"
+category = "current"
+question = "Who won the 2026 World Series, and in how many games?"
+web_search = true
+expect_search = true
+expect_all = ["Brewers"]
+expect_regex = ['\b(five|5)\s+games\b|\b4[-–]1\b']
+
+[[case]]
+id = "current-midterms-2026"
+category = "current"
+question = "After the November 2026 US midterm elections, which party won control of the House and which won the Senate?"
+web_search = true
+expect_search = true
+expect_all = ["Democrat", "House", "Senate"]
+reject_any = ["haven't happened", "has not occurred", "have not occurred", "not yet", "not found", "couldn't find"]
+
+[[case]]
+id = "current-intel-ceo"
+category = "current"
+question = "Who is the current CEO of Intel, and what company did they run before Intel?"
+web_search = true
+expect_search = true
+expect_regex = ['lip[- ]bu tan']
+expect_any = ["Cadence"]
+
+[[case]]
+id = "current-todays-date"
+category = "current"
+question = "What's today's date?"
+expect_all = ["{month_name}"]
+expect_regex = ['\b{day}(st|nd|rd|th)?\b']
+
+# --- when "auto" reasoning should and shouldn't think --------------------------------------------
+
+[[case]]
+id = "route-small-talk"
+category = "routing"
+question = "hey, how's it going?"
+expect_reasoning = false
+
+[[case]]
+id = "route-quick-fact"
+category = "routing"
+question = "What's the capital of France?"
+expect_reasoning = false
+expect_any = ["Paris"]
+
+[[case]]
+id = "route-proof"
+category = "routing"
+question = "Prove that the square root of 2 is irrational."
+expect_reasoning = true
+
+[[case]]
+id = "route-riddle"
+category = "routing"
+question = "Alice has 3 brothers and 2 sisters. How many sisters does Alice's brother have?"
+expect_reasoning = true
+expect_regex = ['\b(3|three)\s+sisters\b']
+
+# --- voice replies ------------------------------------------------------------------------------
+
+[[case]]
+id = "spoken-everest"
+category = "spoken"
+question = "What's the tallest mountain in the world?"
+spoken = true
+expect_any = ["Everest"]
+max_words = 40
+no_markdown = true

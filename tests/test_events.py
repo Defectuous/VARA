@@ -88,3 +88,14 @@ def test_a_failed_reply_is_announced_as_failed():
     assert bus.names()[0] == "exchange_started"
     assert bus.names()[-1] == "exchange_failed"
     assert "exchange_done" not in bus.names()
+
+
+def test_deleting_a_conversation_is_announced_so_open_pages_drop_it():
+    client, bus = client_with_bus(FakeProvider("local", reply="Hi."))
+    conversation_id = client.post("/v1/chat", json=ask("hello")).json()["conversation_id"]
+    bus.events.clear()
+
+    assert client.delete(f"/v1/conversations/{conversation_id}").status_code == 204
+
+    assert bus.events == [("conversation_deleted", {"conversation_id": conversation_id})]
+    assert client.get(f"/v1/conversations/{conversation_id}").status_code == 404
