@@ -89,6 +89,10 @@ Settings come from `VARA_*` environment variables or a local `.env` file (never 
 | `VARA_SYSTEM_PROMPT` | V.A.R.A. persona | Used when a request has no `system` of its own; `{date}` becomes today's date. A request's `system` replaces it (`""` sends none) |
 | `VARA_ANTHROPIC_MODEL` | `claude-opus-5-5` | |
 | `VARA_ANTHROPIC_EFFORT` | `medium` | `low`, `medium`, `high`, `xhigh`, or `max` |
+| `VARA_AGENT_MAX_STEPS` | `8` | Model turns an agent run may take before it must answer from what it has |
+| `VARA_AGENT_RUN_TIMEOUT_SECONDS` | `1200` | Time limit for a whole agent run, including waiting for approvals |
+| `VARA_AGENT_APPROVAL_TIMEOUT_SECONDS` | `600` | How long an approval request waits for your answer before it expires (and the action isn't done) |
+| `VARA_AGENT_MAX_RUNNING` | `3` | Agent runs that may be going at once |
 
 Logs are JSON lines, with API keys, bearer tokens, and password/secret fields redacted.
 
@@ -422,6 +426,41 @@ A backup can be taken while the server is running. Store copies off this PC, and
 (BitLocker), because the database holds your conversations and memories in readable form.
 
 Keep the service bound to localhost until device authentication is implemented.
+
+## Agent and approvals
+
+The agent loop lets the model use tools in steps: it asks for an action, V.A.R.A. checks it, runs it (or
+asks you first), gives the model the result, and repeats until there's an answer. The model never runs
+anything itself; every action is a typed definition in `vara/actions/` with a declared risk level:
+
+| Risk | Examples | Runs |
+| --- | --- | --- |
+| `read_only` | `current_time`, `search_memory`, `web_search`, `market_quotes`, `find_prices`, `list_price_watches` | Straight away |
+| `local_change` | `watch_price`, `stop_price_watch` | Only after you approve it |
+| `external_effect`, `financial` | (none yet) | Only after you approve it |
+
+Unknown tools and invalid arguments are refused and the model is told why. The same action with the same
+arguments isn't run twice in a run (or, for a change, again within 10 minutes). Each run has a step limit,
+a time limit, and a time limit per action. Secrets are redacted from arguments and results before they are
+stored or sent back to a model. The privacy mode applies exactly as in chat.
+
+| Endpoint | What it does |
+| --- | --- |
+| `POST /v1/agent/runs` | Start a run: `goal`, optional `conversation_id`, `provider`, `model`, `confirm_cloud`, `max_steps`, `client_time`. Returns at once; `"wait": true` returns when it has finished. The goal and answer are saved to the conversation |
+| `GET /v1/agent/runs`, `GET /v1/agent/runs/{id}` | Runs, newest first; one run with every action it asked for |
+| `POST /v1/agent/runs/{id}/cancel` | Stop a run |
+| `GET /v1/agent/approvals` | The approval queue: what each waiting action will do, in words, with its arguments |
+| `POST /v1/agent/approvals/{id}` | `{"decision": "approve"}` or `{"decision": "reject", "note": "..."}` |
+| `GET /v1/agent/actions?run_id=&status=&action=` | The audit trail: every action requested, its run and step, the permission it ran under (`read-only`, `approved`), and its result |
+| `GET /v1/agent/tools` | Every tool, its risk, and whether it can be used now |
+| `GET /v1/agent/status` | Paused or not, running runs, pending approvals |
+| `POST /v1/agent/pause`, `POST /v1/agent/resume` | Stop every run at once and refuse new ones; the switch survives a restart |
+
+Live progress appears on `/v1/events`: `agent_run_started`, `agent_delta`, `agent_action`,
+`approval_requested`, `agent_run_finished`, and `agent_paused`. A run or approval left open when the server
+stops is closed as `interrupted` or `expired` the next time it starts.
+
+The chat page doesn't use the agent yet; chat still runs its own search and price-check steps.
 
 ## Answer-quality evals
 

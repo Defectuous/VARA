@@ -10,10 +10,42 @@ from vara.providers.base import (
     ProviderError,
     StreamEvent,
     TextDelta,
+    ToolCall,
+    ToolSpec,
 )
 
 # Server-side fallback re-runs a request on another Claude model if a safety classifier declines it.
 _FALLBACK_BETA = "server-side-fallback-2026-07-01"
+
+
+def _api_messages(messages: Sequence[Message]) -> list[dict]:
+    """Claude's message format: tool calls are `tool_use` blocks in the assistant turn, and the results
+    of one turn's calls go back together as `tool_result` blocks in a single user turn."""
+    converted: list[dict] = []
+    for m in messages:
+        if m.role == "tool":
+            block = {"type": "tool_result", "tool_use_id": m.tool_call_id, "content": m.content}
+            previous = converted[-1] if converted else None
+            if (
+                previous is not None
+                and previous["role"] == "user"
+                and isinstance(previous["content"], list)
+                and previous["content"]
+                and previous["content"][0].get("type") == "tool_result"
+            ):
+                previous["content"].append(block)
+            else:
+                converted.append({"role": "user", "content": [block]})
+        elif m.tool_calls:
+            blocks: list[dict] = [{"type": "text", "text": m.content}] if m.content else []
+            blocks += [
+                {"type": "tool_use", "id": c.id, "name": c.name, "input": c.arguments}
+                for c in m.tool_calls
+            ]
+            converted.append({"role": "assistant", "content": blocks})
+        else:
+            converted.append({"role": m.role, "content": m.content})
+    return converted
 
 
 class AnthropicProvider:
@@ -41,17 +73,23 @@ class AnthropicProvider:
         model: str | None = None,
         system: str | None = None,
         think: bool | None = None,
+        tools: Sequence[ToolSpec] | None = None,
     ) -> dict:
         params = {
             "model": model or self.default_model,
             "max_tokens": self._max_tokens,
-            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "messages": _api_messages(messages),
             "output_config": {"effort": self._effort},
             "betas": [_FALLBACK_BETA],
             "fallbacks": "default",
         }
         if system:
             params["system"] = system
+        if tools:
+            params["tools"] = [
+                {"name": t.name, "description": t.description, "input_schema": t.parameters}
+                for t in tools
+            ]
         return params
 
     async def stream(
@@ -61,8 +99,9 @@ class AnthropicProvider:
         model: str | None = None,
         system: str | None = None,
         think: bool | None = None,
+        tools: Sequence[ToolSpec] | None = None,
     ) -> AsyncIterator[StreamEvent]:
-        params = self.request_body(messages, model=model, system=system)
+        params = self.request_body(messages, model=model, system=system, tools=tools)
         try:
             async with self._client.beta.messages.stream(**params) as stream:
                 async for text in stream.text_stream:
@@ -81,6 +120,9 @@ class AnthropicProvider:
         except anthropic.APIConnectionError as exc:
             raise ProviderError("Could not reach the Anthropic API") from exc
 
+        for block in getattr(final, "content", None) or ():
+            if getattr(block, "type", None) == "tool_use":
+                yield ToolCall(id=block.id, name=block.name, arguments=dict(block.input or {}))
         yield Completed(
             model=final.model,
             stop_reason=final.stop_reason,

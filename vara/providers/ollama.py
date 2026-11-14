@@ -1,4 +1,5 @@
 import json
+import uuid
 from collections.abc import AsyncIterator, Sequence
 
 import httpx
@@ -10,12 +11,26 @@ from vara.providers.base import (
     ProviderError,
     StreamEvent,
     TextDelta,
+    ToolCall,
+    ToolSpec,
 )
+
+
+def _chat_message(m: Message) -> dict:
+    if m.role == "tool":
+        return {"role": "tool", "content": m.content, "tool_name": m.name}
+    entry: dict = {"role": m.role, "content": m.content}
+    if m.tool_calls:
+        entry["tool_calls"] = [
+            {"function": {"name": c.name, "arguments": c.arguments}} for c in m.tool_calls
+        ]
+    return entry
 
 
 class OllamaProvider:
     name = "ollama"
-    capabilities = Capabilities(local=True, context_length=8192)
+    # Tool calling depends on the model (qwen3 and gemma4 have it); a model without it answers in text.
+    capabilities = Capabilities(local=True, context_length=8192, tools=True)
 
     def __init__(
         self,
@@ -41,8 +56,9 @@ class OllamaProvider:
         model: str | None = None,
         system: str | None = None,
         think: bool | None = None,
+        tools: Sequence[ToolSpec] | None = None,
     ) -> dict:
-        chat = [{"role": m.role, "content": m.content} for m in messages]
+        chat = [_chat_message(m) for m in messages]
         if system:
             chat.insert(0, {"role": "system", "content": system})
         name = model or self.default_model
@@ -50,6 +66,18 @@ class OllamaProvider:
         # Only reasoning models accept `think`; send it unless the model is known not to.
         if think is not None and self._thinking.get(name, True):
             body["think"] = think
+        if tools:
+            body["tools"] = [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": t.name,
+                        "description": t.description,
+                        "parameters": t.parameters,
+                    },
+                }
+                for t in tools
+            ]
         if self.keep_alive is not None:
             body["keep_alive"] = self.keep_alive
         return body
@@ -73,10 +101,11 @@ class OllamaProvider:
         model: str | None = None,
         system: str | None = None,
         think: bool | None = None,
+        tools: Sequence[ToolSpec] | None = None,
     ) -> AsyncIterator[StreamEvent]:
         if think is not None:
             await self._learn_thinking(model or self.default_model)
-        body = self.request_body(messages, model=model, system=system, think=think)
+        body = self.request_body(messages, model=model, system=system, think=think, tools=tools)
         try:
             async with self._client.stream("POST", "/api/chat", json=body) as response:
                 if response.status_code != 200:
@@ -86,8 +115,22 @@ class OllamaProvider:
                     if not line:
                         continue
                     chunk = json.loads(line)
-                    if text := chunk.get("message", {}).get("content"):
+                    message = chunk.get("message", {})
+                    if text := message.get("content"):
                         yield TextDelta(text)
+                    for call in message.get("tool_calls") or []:
+                        function = call.get("function", {})
+                        arguments = function.get("arguments") or {}
+                        if isinstance(arguments, str):  # some models send a JSON string
+                            try:
+                                arguments = json.loads(arguments)
+                            except ValueError:
+                                arguments = {"_unparsed": arguments}
+                        yield ToolCall(
+                            id=call.get("id") or uuid.uuid4().hex[:12],
+                            name=function.get("name", ""),
+                            arguments=arguments if isinstance(arguments, dict) else {},
+                        )
                     if chunk.get("done"):
                         yield Completed(
                             model=chunk.get("model", body["model"]),

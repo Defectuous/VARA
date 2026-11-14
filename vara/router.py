@@ -2,7 +2,14 @@ from collections.abc import AsyncIterator, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
-from vara.providers.base import Completed, Message, ModelProvider, ProviderError, StreamEvent
+from vara.providers.base import (
+    Completed,
+    Message,
+    ModelProvider,
+    ProviderError,
+    StreamEvent,
+    ToolSpec,
+)
 from vara.usage import estimate_cost
 
 
@@ -60,15 +67,22 @@ class ModelRouter:
                 f"Sending this request to '{provider.name}' needs confirmation"
             )
 
-    def _candidates(self, provider: str | None, cloud_confirmed: bool) -> list[ModelProvider]:
+    def _candidates(
+        self, provider: str | None, cloud_confirmed: bool, needs_tools: bool = False
+    ) -> list[ModelProvider]:
         if provider is not None:
             if provider not in self._providers:
                 raise NoProviderAvailable({provider: "not configured"})
             chosen = self._providers[provider]
             self._permit(chosen, cloud_confirmed)
+            if needs_tools and not chosen.capabilities.tools:
+                raise NoProviderAvailable({provider: "can't use tools"})
             return [chosen]
 
-        ordered = sorted(self._providers.values(), key=lambda p: not p.capabilities.local)
+        ordered = sorted(
+            (p for p in self._providers.values() if p.capabilities.tools or not needs_tools),
+            key=lambda p: not p.capabilities.local,
+        )
         allowed = []
         for candidate in ordered:
             try:
@@ -94,6 +108,7 @@ class ModelRouter:
         system: str | None = None,
         think: bool | None = None,
         cloud_confirmed: bool = False,
+        tools: Sequence[ToolSpec] | None = None,
     ) -> list[dict]:
         """What each candidate would be sent, in the order they would be tried. Calls nothing."""
         return [
@@ -101,10 +116,10 @@ class ModelRouter:
                 "provider": candidate.name,
                 "local": candidate.capabilities.local,
                 "request": candidate.request_body(
-                    messages, model=model, system=system, think=think
+                    messages, model=model, system=system, think=think, tools=tools
                 ),
             }
-            for candidate in self._candidates(provider, cloud_confirmed)
+            for candidate in self._candidates(provider, cloud_confirmed, bool(tools))
         ]
 
     async def stream(
@@ -116,13 +131,17 @@ class ModelRouter:
         system: str | None = None,
         think: bool | None = None,
         cloud_confirmed: bool = False,
+        tools: Sequence[ToolSpec] | None = None,
     ) -> AsyncIterator[RoutedEvent]:
+        """With `tools`, only providers that can call tools are tried, and the stream may include
+        `ToolCall` events (requests only; nothing runs here)."""
         errors: dict[str, str] = {}
-        for candidate in self._candidates(provider, cloud_confirmed):
+        for candidate in self._candidates(provider, cloud_confirmed, bool(tools)):
             started = False
             try:
+                kwargs = {"tools": tools} if tools else {}
                 async for event in candidate.stream(
-                    messages, model=model, system=system, think=think
+                    messages, model=model, system=system, think=think, **kwargs
                 ):
                     started = True
                     if isinstance(event, Completed):

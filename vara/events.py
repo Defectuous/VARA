@@ -4,7 +4,9 @@ Every chat exchange, from any client (the voice listener, a browser tab, the API
 `exchange_started` with the question, `exchange_notice` while a slow reply hasn't started ("this is going to
 take a minute"), `exchange_delta` for each piece of the reply, then `exchange_done`
 (stored; carries the conversation id) or `exchange_failed`. Deleting a conversation, from any client,
-announces `conversation_deleted` with its id. Clients subscribe through `GET /v1/events`.
+announces `conversation_deleted` with its id. Agent runs (vara/agent.py) announce `agent_run_started`,
+`agent_delta`, `agent_action` (each change to an action's status), `approval_requested`, `agent_run_finished`,
+and `agent_paused`. Clients subscribe through `GET /v1/events`.
 
 Nothing is stored; a client that isn't connected simply misses the events and reads the history instead.
 V.A.R.A. runs as a single process, so an in-memory list of subscribers is enough.

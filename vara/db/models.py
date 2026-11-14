@@ -165,3 +165,92 @@ class SetupStep(Base):
 
     key: Mapped[str] = mapped_column(String(30), primary_key=True)
     completed_at: Mapped[datetime] = mapped_column(default=utcnow)
+
+
+class RunStatus(StrEnum):
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"  # by you, or by the pause switch
+    STOPPED = "stopped"  # hit its step or time limit
+    INTERRUPTED = "interrupted"  # the server stopped while it was running
+
+
+class AgentRun(Base):
+    """One request handled by the agent loop (vara/agent.py): the goal, who answered, and how it ended."""
+
+    __tablename__ = "agent_runs"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    goal: Mapped[str] = mapped_column(Text)
+    status: Mapped[RunStatus] = mapped_column(String(20), default=RunStatus.RUNNING)
+    conversation_id: Mapped[int | None] = mapped_column(
+        ForeignKey("conversations.id", ondelete="SET NULL")
+    )
+    client: Mapped[str | None] = mapped_column(String(64))
+    provider: Mapped[str | None] = mapped_column(String(50))
+    model: Mapped[str | None] = mapped_column(String(100))
+    steps: Mapped[int] = mapped_column(default=0)
+    max_steps: Mapped[int]
+    final_text: Mapped[str | None] = mapped_column(Text)
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    finished_at: Mapped[datetime | None]
+
+    actions: Mapped[list["ActionRecord"]] = relationship(
+        back_populates="run", cascade="all, delete-orphan", order_by="ActionRecord.id"
+    )
+
+
+class ActionStatus(StrEnum):
+    INVALID = "invalid"  # unknown tool or bad arguments; nothing ran
+    AWAITING_APPROVAL = "awaiting_approval"
+    REJECTED = "rejected"  # you said no
+    EXPIRED = "expired"  # nobody answered the approval in time
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    TIMED_OUT = "timed_out"
+    CANCELLED = "cancelled"
+    DUPLICATE = (
+        "duplicate"  # already done; the earlier result was reused instead of running it again
+    )
+
+
+class ActionRecord(Base):
+    """The audit trail: one row per action the model asked for, whatever happened to it. Rows waiting
+    for approval are the approval queue. Arguments and results are stored redacted."""
+
+    __tablename__ = "action_records"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("agent_runs.id", ondelete="CASCADE"), index=True)
+    step: Mapped[int]  # the loop step (model turn) that asked for it
+    tool_call_id: Mapped[str | None] = mapped_column(String(100))
+    action: Mapped[str] = mapped_column(String(60))
+    risk: Mapped[str | None] = mapped_column(String(20))
+    arguments: Mapped[str] = mapped_column(Text)  # JSON
+    fingerprint: Mapped[str] = mapped_column(String(64), index=True)  # action + arguments, hashed
+    description: Mapped[str | None] = mapped_column(Text)  # what it will do, in words
+    status: Mapped[ActionStatus] = mapped_column(String(20), index=True)
+    # What allowed it to run: "read-only" for safe actions, "approved" for ones you approved.
+    permission: Mapped[str | None] = mapped_column(String(40))
+    decided_at: Mapped[datetime | None]
+    decision_note: Mapped[str | None] = mapped_column(Text)
+    result: Mapped[str | None] = mapped_column(Text)  # what the model was told
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow)
+    started_at: Mapped[datetime | None]
+    finished_at: Mapped[datetime | None]
+
+    run: Mapped[AgentRun] = relationship(back_populates="actions")
+
+
+class AgentControl(Base):
+    """Switches that outlive a restart, such as the pause on all agent activity."""
+
+    __tablename__ = "agent_controls"
+
+    key: Mapped[str] = mapped_column(String(30), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)

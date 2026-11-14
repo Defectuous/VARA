@@ -117,6 +117,10 @@ Remaining: text extraction, chunking with source locations, keyword then semanti
 
 ### 5. Add the agent loop, approval layer, and audit trail
 
+**Status:** Started (2026-11-14). Done: tool calling in the provider interface (Ollama, Anthropic, and the fake provider); typed actions with risk levels and Pydantic-checked arguments (`vara/actions/`); the agent loop (`vara/agent.py`) with an approval queue, step, run, and per-action time limits, cancellation, duplicate protection, redaction, and an audit record for every requested action; a pause switch that stops every run and survives restarts; the `/v1/agent/*` API and live events; 32 tests. First tools: current time, memory search, web search, market quotes, price checks, and price watches (starting or stopping a watch needs approval). Live check on qwen3:14b: it called market quotes and web search together in one step and answered in about 5 s; a price watch waited for approval and, once rejected, was not made.
+
+Remaining: approval prompts and a run view in the chat page (and the voice listener); moving chat's own search and price-check steps onto the agent, compared with the evals; durable job storage so a run can resume after a restart; retention and export for the audit trail.
+
 **Work:** Represent every tool as a typed, narrowly scoped action with a declared risk level: read-only, local change, external effect, or financial. Build the agent loop: the model proposes a plan, the backend validates each step, runs it (or waits for approval), returns the result to the model, and reports progress. Add an approval queue that shows the exact action and target; cancellation; step limits and timeouts; duplicate-action protection; and an audit record for every action. Redact sensitive values before they reach logs or cloud models. Start with safe read-only tools (current time, memory search, knowledge search) so the loop is proven before any tool can change anything.
 
 **Tools:** Pydantic models for action schemas; a durable local job table in SQLite; the provider interface's tool-call support from Phase 2.
@@ -211,7 +215,7 @@ Remaining: wake-word accuracy (model v5: about 63% of plain "VARA" from unfamili
 
 ## Next Implementation Session
 
-Test the voice listener with real use (wake-word hit rate and false wake-ups at home) and keep improving the wake word. Then Phase 5's agent loop and approval layer, which the custom-agents and self-upgrade goals in **To Do** build on; web search becomes its first tool. Still open from earlier: Phase 4 text extraction and keyword search for allowed folders; Phase 3's scheduled off-PC backup; the OpenAI adapter once its key is in Credential Manager.
+Phase 5: approval prompts in the chat page, then move chat's search and price checks onto the agent loop (check with the evals that answers don't get worse). Custom agents (**To Do**) build on it after that. Test the voice listener with real use (wake-word hit rate and false wake-ups at home) and keep improving the wake word. Still open from earlier: Phase 4 text extraction and keyword search for allowed folders; Phase 3's scheduled off-PC backup; the OpenAI adapter once its key is in Credential Manager.
 
 ## To Do
 

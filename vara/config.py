@@ -106,6 +106,14 @@ class Settings(BaseSettings):
     anthropic_model: str = "claude-opus-5-5"
     anthropic_effort: str = "medium"
 
+    # The agent loop (vara/agent.py): model turns per run, the time a whole run may take (including
+    # waiting for approvals), how long an approval request waits for an answer before it expires, and
+    # how many runs may be going at once.
+    agent_max_steps: int = 8
+    agent_run_timeout_seconds: float = 1200.0
+    agent_approval_timeout_seconds: float = 600.0
+    agent_max_running: int = 3
+
     # Ollama models `python -m vara eval` tests when none are named, comma-separated. Empty tests
     # only `ollama_model`.
     eval_models: str = ""

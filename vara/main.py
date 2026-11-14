@@ -7,6 +7,9 @@ from fastapi import FastAPI
 from fastapi.responses import FileResponse
 
 from vara import retention
+from vara.actions import ActionContext, ActionRegistry, default_registry
+from vara.agent import AgentManager, RunOptions
+from vara.agent_api import agent as agent_routes
 from vara.api import health, v1
 from vara.config import Settings, get_settings
 from vara.credentials import get_api_key
@@ -95,6 +98,7 @@ def create_app(
     web_search=None,
     markets=None,
     deals=None,
+    actions: ActionRegistry | None = None,
 ) -> FastAPI:
     settings = settings or get_settings()
     search_service = SearxngService(
@@ -124,6 +128,7 @@ def create_app(
         if settings.voice_warm_up:
             tasks.append(asyncio.create_task(_warm_up_voice(app, settings)))
         yield
+        await app.state.agent.shutdown()
         stop.set()
         for task in tasks:
             task.cancel()
@@ -178,6 +183,29 @@ def create_app(
         app.state.deals = DealFinder(app.state.web, bestbuy_key=get_api_key("bestbuy"))
     else:
         app.state.deals = None
+
+    # The agent loop and its typed actions (Phase 5). Runs left open by a stopped server are closed.
+    def agent_context(options: RunOptions) -> ActionContext:
+        return ActionContext(
+            db=db,
+            settings=settings,
+            web=app.state.web,
+            markets=app.state.markets,
+            deals=app.state.deals,
+            now=options.client_time,
+            timezone=options.client_timezone,
+        )
+
+    app.state.agent_context = agent_context
+    app.state.agent = AgentManager(
+        db=db,
+        router=app.state.router,
+        registry=actions or default_registry(),
+        settings=settings,
+        bus=app.state.events,
+        context=agent_context,
+    )
+    app.state.agent.recover()
     # Unversioned liveness check for scripts and service managers.
     app.add_api_route("/health", health, methods=["GET"])
     app.add_api_route("/", chat_page, methods=["GET"], include_in_schema=False)
@@ -189,4 +217,5 @@ def create_app(
     app.include_router(web)
     app.include_router(deals_routes)
     app.include_router(documents_routes)
+    app.include_router(agent_routes)
     return app
