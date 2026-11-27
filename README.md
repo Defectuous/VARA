@@ -91,6 +91,10 @@ Settings come from `VARA_*` environment variables or a local `.env` file (never 
 | `VARA_ANTHROPIC_EFFORT` | `medium` | `low`, `medium`, `high`, `xhigh`, or `max` |
 | `VARA_OPENAI_MODEL` | `gpt-6.2-sol` | Used when the `openai` key is stored. `gpt-6.2-astra` is the top model at four times the price |
 | `VARA_XAI_MODEL` | `grok-4.7` | xAI's Grok; used when the `xai` key is stored |
+| `VARA_GEMINI_MODEL` | `gemini-4-hydrogen` | Google Gemini; used when the `gemini` key (from Google AI Studio) is stored. `gemini-4-carbon` is the strongest |
+| `VARA_DEEPSEEK_MODEL` | `deepseek-v4-pro` | Used when the `deepseek` key is stored. `deepseek-flash` is cheaper. Half price off-peak |
+| `VARA_KIMI_MODEL` | `kimi-k3.1-pro` | Moonshot's Kimi; used when the `kimi` key is stored. Cost isn't tracked yet |
+| `VARA_PERPLEXITY_MODEL` | `perplexity/glm-5.3` | Used when the `perplexity` key is stored. This is Perplexity's Orchestrator, which serves many companies' models under one key (e.g. `anthropic/claude-sonnet-5-5`); it doesn't search the web (V.A.R.A.'s own search does that) |
 | `VARA_AGENT_MAX_STEPS` | `8` | Model turns an agent run may take before it must answer from what it has |
 | `VARA_AGENT_RUN_TIMEOUT_SECONDS` | `1200` | Time limit for a whole agent run, including waiting for approvals |
 | `VARA_AGENT_APPROVAL_TIMEOUT_SECONDS` | `600` | How long an approval request waits for your answer before it expires (and the action isn't done) |
@@ -104,7 +108,7 @@ API keys are not configuration. Store them in Windows Credential Manager under t
 uv run --with keyring python -c "import keyring, getpass; keyring.set_password('vara', 'anthropic', getpass.getpass('Key: '))"
 ```
 
-Use the same command with `openai` (OpenAI) or `xai` (Grok) in place of `anthropic` for those providers.
+Use the same command with `openai`, `xai` (Grok), `gemini`, `deepseek`, `kimi`, or `perplexity` in place of `anthropic` for those providers.
 
 A cloud provider is enabled only when its key is present. Check with `GET /v1/providers`.
 

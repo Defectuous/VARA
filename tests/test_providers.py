@@ -300,3 +300,96 @@ def test_cloud_providers_register_only_with_a_key(monkeypatch) -> None:
     names = [p.name for p in main.build_router(Settings()).providers]
 
     assert names == ["ollama", "openai", "xai"]
+
+
+def test_reasoning_goes_back_with_the_tool_calls() -> None:
+    """DeepSeek and Kimi refuse a tool loop whose assistant turn lost its `reasoning_content`."""
+    chunks = [
+        {"choices": [{"delta": {"reasoning_content": "Need the "}}]},
+        {"choices": [{"delta": {"reasoning_content": "forecast."}}]},
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "c1",
+                                "function": {"name": "weather", "arguments": "{}"},
+                            }
+                        ]
+                    }
+                }
+            ]
+        },
+        {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
+    ]
+    provider = _openai(lambda request: httpx.Response(200, text=_sse(chunks)), "kimi", "Kimi")
+
+    events = drain(provider)
+    call = events[0]
+    body = provider.request_body(
+        [Message("user", "rain?"), Message("assistant", "", tool_calls=(call,))]
+    )
+
+    assert not any(isinstance(e, TextDelta) for e in events)  # reasoning isn't shown
+    assert body["messages"][1]["reasoning_content"] == "Need the forecast."
+
+
+def test_extra_tool_call_fields_and_calls_without_index_round_trip() -> None:
+    """Gemini sends whole calls without `index`, with its own fields that must be sent back."""
+    signature = {"google": {"thought_signature": "abc"}}
+
+    def call(call_id: str, name: str) -> dict:
+        return {
+            "id": call_id,
+            "type": "function",
+            "function": {"name": name, "arguments": "{}"},
+            "extra_content": signature,
+        }
+
+    chunks = [
+        {"choices": [{"delta": {"tool_calls": [call("a", "time")]}}]},
+        {"choices": [{"delta": {"tool_calls": [call("b", "weather")]}}]},
+        {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
+    ]
+    provider = _openai(lambda request: httpx.Response(200, text=_sse(chunks)), "gemini", "Gemini")
+
+    first, second = drain(provider)[:2]
+    sent = provider.request_body([Message("assistant", "", tool_calls=(first, second))])
+
+    assert (first.name, second.name) == ("time", "weather")
+    assert sent["messages"][0]["tool_calls"][1]["extra_content"] == signature
+    assert "reasoning_content" not in sent["messages"][0]
+
+
+def test_deepseek_thinking_switch_follows_think() -> None:
+    from vara.providers.openai_compat import OpenAICompatibleProvider
+
+    provider = OpenAICompatibleProvider(
+        "deepseek",
+        "k",
+        label="DeepSeek",
+        base_url="http://api",
+        default_model="m",
+        thinking_switch=True,
+    )
+    hi = [Message("user", "hi")]
+
+    assert provider.request_body(hi, think=False)["thinking"] == {"type": "disabled"}
+    assert provider.request_body(hi, think=True)["thinking"] == {"type": "enabled"}
+    assert "thinking" not in provider.request_body(hi)
+    assert "thinking" not in _openai(lambda r: httpx.Response(200)).request_body(hi, think=True)
+
+
+def test_every_cloud_provider_registers_with_its_key(monkeypatch) -> None:
+    from vara import main
+    from vara.config import Settings
+
+    names = ["anthropic", "openai", "xai", "gemini", "deepseek", "kimi", "perplexity"]
+    monkeypatch.setattr(main, "get_api_key", lambda name: "key" if name in names else None)
+
+    providers = main.build_router(Settings()).providers
+
+    assert [p.name for p in providers] == ["ollama", *names]
+    assert all(p.capabilities.tools for p in providers)

@@ -28,6 +28,9 @@ class ToolCall:
     id: str
     name: str
     arguments: dict
+    # Provider data that must go back with the call on the next request (for example a model's
+    # reasoning, or Gemini's per-call fields). Only the provider that made the call reads it.
+    extra: dict | None = field(default=None, compare=False)
 
 
 @dataclass(frozen=True)

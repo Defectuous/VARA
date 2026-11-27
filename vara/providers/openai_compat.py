@@ -1,5 +1,10 @@
-"""Providers that speak OpenAI's Chat Completions API: OpenAI itself and xAI (Grok), and later Groq and
-OpenRouter, which use the same format at their own base URL."""
+"""Providers that speak OpenAI's Chat Completions API: OpenAI, xAI (Grok), Google Gemini, Perplexity,
+DeepSeek, and Kimi (Moonshot), each at its own base URL.
+
+Reasoning models (DeepSeek, Kimi) stream their reasoning as `reasoning_content`, which must go back with
+the assistant turn during a tool-call loop or the next request is refused. It isn't shown; it rides on the
+turn's tool calls (`ToolCall.extra`) and is sent back from there. Any other fields a provider puts on a
+tool call (Gemini's `extra_content`) are kept and sent back the same way."""
 
 import json
 import uuid
@@ -21,6 +26,12 @@ from vara.providers.base import (
 
 OPENAI_URL = "https://api.openai.com/v1"
 XAI_URL = "https://api.x.ai/v1"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+PERPLEXITY_URL = "https://api.perplexity.ai/orchestrator/v1"
+DEEPSEEK_URL = "https://api.deepseek.com"
+KIMI_URL = "https://api.moonshot.ai/v1"
+
+_CALL_KEYS = {"index", "id", "type", "function"}
 
 
 def _chat_message(m: Message) -> dict:
@@ -31,12 +42,15 @@ def _chat_message(m: Message) -> dict:
         entry["content"] = m.content or None
         entry["tool_calls"] = [
             {
+                **((c.extra or {}).get("fields") or {}),
                 "id": c.id,
                 "type": "function",
                 "function": {"name": c.name, "arguments": json.dumps(c.arguments)},
             }
             for c in m.tool_calls
         ]
+        if reasoning := (m.tool_calls[0].extra or {}).get("reasoning_content"):
+            entry["reasoning_content"] = reasoning
     return entry
 
 
@@ -48,6 +62,19 @@ def _parse_arguments(raw: str) -> dict:
     except ValueError:
         return {"_unparsed": raw}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def _call_key(calls: dict[int, dict], piece: dict) -> int:
+    """Which call a streamed piece belongs to: by `index`, or for providers that leave it out
+    (Gemini sends each call whole), by id, else a new call."""
+    if (index := piece.get("index")) is not None:
+        return index
+    for key, call in calls.items():
+        if piece.get("id") and call["id"] == piece["id"]:
+            return key
+    if not piece.get("id") and calls:
+        return max(calls)  # more arguments for the latest call
+    return max(calls, default=-1) + 1
 
 
 class OpenAICompatibleProvider:
@@ -63,9 +90,13 @@ class OpenAICompatibleProvider:
         default_model: str,
         context_length: int = 128_000,
         vision: bool = True,
+        thinking_switch: bool = False,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self.name = name
+        # Whether `think` is sent as DeepSeek's `thinking: {"type": "enabled" | "disabled"}`. Others
+        # either can't turn reasoning off (Kimi K3, Gemini 4) or decide for themselves.
+        self._thinking_switch = thinking_switch
         self.label = label
         self.default_model = default_model
         self.capabilities = Capabilities(
@@ -95,6 +126,8 @@ class OpenAICompatibleProvider:
             "stream": True,
             "stream_options": {"include_usage": True},
         }
+        if self._thinking_switch and think is not None:
+            body["thinking"] = {"type": "enabled" if think else "disabled"}
         if tools:
             body["tools"] = [
                 {
@@ -127,7 +160,8 @@ class OpenAICompatibleProvider:
         think: bool | None = None,
         tools: Sequence[ToolSpec] | None = None,
     ) -> AsyncIterator[StreamEvent]:
-        body = self.request_body(messages, model=model, system=system, tools=tools)
+        body = self.request_body(messages, model=model, system=system, think=think, tools=tools)
+        reasoning = ""
         answered_by = body["model"]
         stop_reason: str | None = None
         usage: dict = {}
@@ -152,13 +186,18 @@ class OpenAICompatibleProvider:
                         usage = chunk["usage"]
                     for choice in chunk.get("choices") or ():
                         delta = choice.get("delta") or {}
+                        reasoning += delta.get("reasoning_content") or ""
                         if text := delta.get("content"):
                             yield TextDelta(text)
                         for piece in delta.get("tool_calls") or ():
                             call = calls.setdefault(
-                                piece.get("index", 0), {"id": None, "name": "", "arguments": ""}
+                                _call_key(calls, piece),
+                                {"id": None, "name": "", "arguments": "", "fields": {}},
                             )
                             call["id"] = piece.get("id") or call["id"]
+                            call["fields"].update(
+                                {k: v for k, v in piece.items() if k not in _CALL_KEYS}
+                            )
                             function = piece.get("function") or {}
                             call["name"] += function.get("name") or ""
                             call["arguments"] += function.get("arguments") or ""
@@ -170,10 +209,16 @@ class OpenAICompatibleProvider:
             raise ProviderError(f"{self.label} ended the stream without finishing")
 
         for _, call in sorted(calls.items()):
+            extra = {}
+            if call["fields"]:
+                extra["fields"] = call["fields"]
+            if reasoning:
+                extra["reasoning_content"] = reasoning
             yield ToolCall(
                 id=call["id"] or uuid.uuid4().hex[:12],
                 name=call["name"],
                 arguments=_parse_arguments(call["arguments"]),
+                extra=extra or None,
             )
         yield Completed(
             model=answered_by,

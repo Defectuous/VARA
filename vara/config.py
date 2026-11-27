@@ -109,9 +109,16 @@ class Settings(BaseSettings):
 
     anthropic_model: str = "claude-opus-5-5"
     anthropic_effort: str = "medium"
-    # OpenAI and xAI (Grok) are used only when their key ("openai", "xai") is in the credential store.
+    # Other cloud providers, each used only when its key is in the credential store under the same name
+    # ("openai", "xai", "gemini", "deepseek", "kimi", "perplexity").
     openai_model: str = "gpt-6.2-sol"
     xai_model: str = "grok-4.7"
+    gemini_model: str = "gemini-4-hydrogen"
+    deepseek_model: str = "deepseek-v4-pro"
+    kimi_model: str = "kimi-k3.1-pro"
+    # Perplexity's Chat Completions endpoint (the Orchestrator) serves many companies' models under one
+    # key; it does no web search of its own. "perplexity/..." models are Perplexity-hosted.
+    perplexity_model: str = "perplexity/glm-5.3"
 
     # The agent loop (vara/agent.py): model turns per run, the time a whole run may take (including
     # waiting for approvals), how long an approval request waits for an answer before it expires, and

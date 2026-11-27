@@ -27,7 +27,15 @@ from vara.price_watch import maintain_watches
 from vara.providers.anthropic import AnthropicProvider
 from vara.providers.base import ModelProvider
 from vara.providers.ollama import OllamaProvider
-from vara.providers.openai_compat import OPENAI_URL, XAI_URL, OpenAICompatibleProvider
+from vara.providers.openai_compat import (
+    DEEPSEEK_URL,
+    GEMINI_URL,
+    KIMI_URL,
+    OPENAI_URL,
+    PERPLEXITY_URL,
+    XAI_URL,
+    OpenAICompatibleProvider,
+)
 from vara.router import ModelRouter
 from vara.search.api import maintain, web
 from vara.search.client import SearxngClient
@@ -57,6 +65,19 @@ def _icon_route(name: str):
     return icon
 
 
+# Cloud providers that speak OpenAI's Chat Completions format, in fallback order: credential name (also
+# the provider's name), what errors call it, base URL, the setting holding its default model, context
+# length, and any adapter options.
+_OPENAI_COMPATIBLE = (
+    ("openai", "OpenAI", OPENAI_URL, "openai_model", 400_000, {}),
+    ("xai", "xAI", XAI_URL, "xai_model", 500_000, {}),
+    ("gemini", "Gemini", GEMINI_URL, "gemini_model", 1_048_576, {}),
+    ("deepseek", "DeepSeek", DEEPSEEK_URL, "deepseek_model", 1_000_000, {"thinking_switch": True}),
+    ("kimi", "Kimi", KIMI_URL, "kimi_model", 1_048_576, {}),
+    ("perplexity", "Perplexity", PERPLEXITY_URL, "perplexity_model", 1_000_000, {}),
+)
+
+
 def build_router(settings: Settings) -> ModelRouter:
     providers: list[ModelProvider] = [
         OllamaProvider(
@@ -73,28 +94,19 @@ def build_router(settings: Settings) -> ModelRouter:
                 key, default_model=settings.anthropic_model, effort=settings.anthropic_effort
             )
         )
-    if key := get_api_key("openai"):
-        providers.append(
-            OpenAICompatibleProvider(
-                "openai",
-                key,
-                label="OpenAI",
-                base_url=OPENAI_URL,
-                default_model=settings.openai_model,
-                context_length=400_000,
+    for name, label, base_url, model, context, extra in _OPENAI_COMPATIBLE:
+        if key := get_api_key(name):
+            providers.append(
+                OpenAICompatibleProvider(
+                    name,
+                    key,
+                    label=label,
+                    base_url=base_url,
+                    default_model=getattr(settings, model),
+                    context_length=context,
+                    **extra,
+                )
             )
-        )
-    if key := get_api_key("xai"):
-        providers.append(
-            OpenAICompatibleProvider(
-                "xai",
-                key,
-                label="xAI",
-                base_url=XAI_URL,
-                default_model=settings.xai_model,
-                context_length=500_000,
-            )
-        )
     return ModelRouter(providers, settings.privacy_mode)
 
 

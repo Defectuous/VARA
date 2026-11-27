@@ -8,7 +8,7 @@ The roadmap is intentionally staged. Build a trustworthy local foundation first,
 
 | Area | What V.A.R.A. should do | Phase |
 | --- | --- | --- |
-| Multiple models | Local models through Ollama, plus optional Anthropic Claude, OpenAI, xAI Grok, Google Gemini, Groq, and OpenRouter; manual model choice or automatic routing | 2 |
+| Multiple models | Local models through Ollama, plus optional Anthropic Claude, OpenAI, xAI Grok, Google Gemini, DeepSeek, Kimi, Perplexity, Groq, and OpenRouter; manual model choice or automatic routing | 2 |
 | Memory | Persistent, user-controlled context across conversations: preferences, projects, commitments | 3 |
 | Personal knowledge | Chat with documents, PDFs, notes, code, and past conversations; keyword and semantic search (RAG) | 4 |
 | Agent and tools | Multi-step tool use with progress, failure handling, verification, approvals, and audit history | 5 |
@@ -55,7 +55,7 @@ The roadmap is intentionally staged. Build a trustworthy local foundation first,
 
 ### 2. Add local and cloud model providers
 
-**Status:** Started. The provider interface, the fake provider, the privacy-mode router (tested), the Ollama and Anthropic adapters, and `/v1/chat` and `/v1/providers` exist. Claude and Ollama have each answered a live request; in `local_only` mode the answer came from Ollama with no cloud call. Streaming (`/v1/chat/stream`), context inspection (`/v1/chat/preview`), and in-memory cost tracking (`/v1/usage`) exist. Usage is now stored in the Phase 3 database. OpenAI and xAI (Grok) share one Chat Completions adapter (`vara/providers/openai_compat.py`, tested with mocked responses; not yet tried live). Remaining: Gemini, Groq, and OpenRouter adapters (Groq and OpenRouter can reuse the same adapter with their own base URL).
+**Status:** Started. The provider interface, the fake provider, the privacy-mode router (tested), the Ollama and Anthropic adapters, and `/v1/chat` and `/v1/providers` exist. Claude and Ollama have each answered a live request; in `local_only` mode the answer came from Ollama with no cloud call. Streaming (`/v1/chat/stream`), context inspection (`/v1/chat/preview`), and in-memory cost tracking (`/v1/usage`) exist. Usage is now stored in the Phase 3 database. OpenAI, xAI (Grok), Google Gemini, DeepSeek, Kimi, and Perplexity share one Chat Completions adapter (`vara/providers/openai_compat.py`, tested with mocked responses; none tried live yet). It sends reasoning models' `reasoning_content` and Gemini's per-call fields back during tool loops. Costs are tracked for all but Kimi (its price table wouldn't load). Remaining: Groq and OpenRouter (one line each in `vara/main.py`), and Perplexity's search-grounded Agent API if wanted.
 
 **RTX 5060 benchmark (2026-11-03):** `llama3.1:8b` Q4_K_M sits fully in VRAM (4.9 GiB), generates about 76 tokens/s, and answers a 300-word prompt in under 5 seconds. With the model loaded, about 1.4 GiB of the card's 8 GiB is still free, which rules out a 12B/14B model on this card. `nvidia-smi` lists only the RTX 5060; the V100 is still not visible.
 
@@ -217,7 +217,7 @@ Remaining: wake-word accuracy (model v5: about 63% of plain "VARA" from unfamili
 
 ## Next Implementation Session
 
-Phase 5: move chat's search and price checks onto the agent loop (Tools on by default) (check with the evals that answers don't get worse). Custom agents (**To Do**) build on it after that. Test the voice listener with real use (wake-word hit rate and false wake-ups at home) and keep improving the wake word. Still open from earlier: Phase 4 text extraction and keyword search for allowed folders; Phase 3's scheduled off-PC backup; a live check of the OpenAI and xAI adapters once their keys are in Credential Manager.
+Phase 5: move chat's search and price checks onto the agent loop (Tools on by default) (check with the evals that answers don't get worse). Custom agents (**To Do**) build on it after that. Test the voice listener with real use (wake-word hit rate and false wake-ups at home) and keep improving the wake word. Still open from earlier: Phase 4 text extraction and keyword search for allowed folders; Phase 3's scheduled off-PC backup; a live check of each cloud adapter (OpenAI, xAI, Gemini, DeepSeek, Kimi, Perplexity) once its key is in Credential Manager.
 
 ## To Do
 
