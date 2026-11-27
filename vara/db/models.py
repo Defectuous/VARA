@@ -254,3 +254,38 @@ class AgentControl(Base):
     key: Mapped[str] = mapped_column(String(30), primary_key=True)
     value: Mapped[str] = mapped_column(Text)
     updated_at: Mapped[datetime] = mapped_column(default=utcnow, onupdate=utcnow)
+
+
+class WeatherSnapshot(Base):
+    """One forecast as it was fetched (vara/weather/watch.py). Kept as history, not just the latest, so
+    later reports can see what the forecast said before an illness and what actually happened."""
+
+    __tablename__ = "weather_snapshots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    fetched_at: Mapped[datetime] = mapped_column(default=utcnow, index=True)
+    latitude: Mapped[float]
+    longitude: Mapped[float]
+    hours: Mapped[str | None] = mapped_column(Text)  # JSON: the past 24 h and the next 7 days
+    outlook: Mapped[str | None] = mapped_column(Text)  # JSON: the 3-day risk, as computed then
+    error: Mapped[str | None] = mapped_column(Text)  # set when the fetch failed
+
+
+class WeatherAlert(Base):
+    """A warning that the weather is about to shift. Sent to Discord outside quiet hours, spoken by the
+    voice listener when you're active, and mentioned in V.A.R.A.'s next reply."""
+
+    __tablename__ = "weather_alerts"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(default=utcnow, index=True)
+    target_date: Mapped[str] = mapped_column(String(10))  # the riskiest day, YYYY-MM-DD (local)
+    score: Mapped[int]
+    spoken: Mapped[str] = mapped_column(Text)  # a sentence or two for the voice listener
+    text: Mapped[str] = mapped_column(Text)  # the full alert, with the checklist
+    outlook: Mapped[str] = mapped_column(Text)  # JSON
+    test: Mapped[bool] = mapped_column(default=False)
+    discord_sent_at: Mapped[datetime | None]
+    discord_error: Mapped[str | None] = mapped_column(Text)
+    announced_at: Mapped[datetime | None]  # the voice listener said it
+    seen_at: Mapped[datetime | None]  # mentioned in a reply

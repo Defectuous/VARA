@@ -31,6 +31,7 @@ from vara.router import (
 )
 from vara.search import planner
 from vara.search.client import SearchFailed, search_context
+from vara.weather import watch as weather_watch
 
 v1 = APIRouter(prefix="/v1")
 
@@ -120,6 +121,7 @@ class ChatResponse(BaseModel):
     # When the reply came through the agent loop: its run, and each tool it asked for.
     agent_run_id: int | None = None
     actions: list[dict] | None = None
+    weather_alerts: list[dict] | None = None
 
 
 def _router(request: Request) -> ModelRouter:
@@ -159,6 +161,7 @@ class _Prepared:
     document: dict | None = None
     agent_run_id: int | None = None
     actions: list[dict] | None = None
+    weather_alerts: list[dict] | None = None
 
 
 SPOKEN_REPLY = (
@@ -558,8 +561,20 @@ def _cannot_use_tools(exc: Exception) -> bool:
     return any("can't use tools" in r or "does not support tools" in r for r in reasons)
 
 
+def _add_weather_alerts(request: Request, prepared: _Prepared) -> None:
+    """Weather alerts from the last day that no reply has mentioned yet (vara/weather/watch.py)."""
+    if getattr(request.app.state, "weather", None) is None:
+        return
+    with _db(request).session() as session:
+        if alerts := weather_watch.unseen_alerts(session):
+            _append_system(prepared, weather_watch.alerts_context(alerts))
+            prepared.weather_alerts = [weather_watch.alert_dict(a) for a in alerts]
+            weather_watch.mark_seen(alerts)
+
+
 async def _open_answer(request: Request, prepared: _Prepared) -> AsyncIterator[RoutedEvent]:
     """Everything before the reply streams: tools through the agent loop, or the fixed search steps."""
+    _add_weather_alerts(request, prepared)
     if _uses_tools(request, prepared.body):
         _add_price_alerts(request, prepared)
         if (events := await _open_agent_stream(request, prepared)) is not None:
@@ -605,6 +620,7 @@ def _persist(request: Request, prepared: _Prepared, reply: str, summary: dict) -
         "document": prepared.document,
         "agent_run_id": prepared.agent_run_id,
         "actions": prepared.actions,
+        "weather_alerts": prepared.weather_alerts,
     }
 
 

@@ -586,6 +586,7 @@ function connectLive() {
   on("exchange_done", liveDone);
   on("exchange_failed", liveFailed);
   source.addEventListener("price_alert", (e) => showAlert(JSON.parse(e.data)));
+  source.addEventListener("weather_alert", (e) => showWeatherAlert(JSON.parse(e.data)));
   for (const name of ["agent_run_started", "agent_delta", "agent_action", "approval_requested", "agent_run_finished", "agent_paused"]) {
     source.addEventListener(name, (e) => agentEvent(name, JSON.parse(e.data)));
   }
@@ -659,6 +660,27 @@ function showAlert(a) {
   };
   div.append("🏷 ", text, close);
   $("alerts").appendChild(div);
+}
+
+// Weather alerts (vara/weather/watch.py): the full text, until dismissed or a reply has mentioned it.
+function showWeatherAlert(a) {
+  const key = `weather-${a.id}`;
+  if ($("alerts").querySelector(`[data-alert="${key}"]`)) return;
+  const div = document.createElement("div");
+  div.className = "alert";
+  div.dataset.alert = key;
+  const text = document.createElement("span");
+  text.className = "grow";
+  text.style.whiteSpace = "pre-line";
+  text.textContent = a.text;
+  const close = document.createElement("button");
+  close.type = "button";
+  close.title = "Dismiss";
+  close.textContent = "✕";
+  close.onclick = () => div.remove();
+  div.append("🌦 ", text, close);
+  $("alerts").appendChild(div);
+  scrollDown();
 }
 
 function clearAlerts(alerts) {

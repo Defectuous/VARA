@@ -51,6 +51,12 @@ public interface IChimes
 ///                false wake-up and is dropped; otherwise the request goes to chat.
 ///   Speaking   - the reply is spoken sentence by sentence as it streams. Saying "VARA" interrupts it.
 /// Saying only "VARA" gets a "Yes?" and one follow-up capture that doesn't need the wake word.
+///
+/// Announcements (a weather alert from the backend) are spoken only while you're active: talking to
+/// V.A.R.A. now, within <see cref="ListenerSettings.ConversationIdleMinutes"/> of the last exchange, or
+/// active elsewhere according to the backend. They never interrupt: one that arrives mid-request waits
+/// until V.A.R.A. is back to listening. After it, V.A.R.A. asks "Want the details?" and listens once
+/// without the wake word, so a "yes" goes straight to chat (which knows about the alert).
 /// </summary>
 public sealed class VoiceLoop
 {
@@ -75,6 +81,15 @@ public sealed class VoiceLoop
     private DateTimeOffset _lastExchange = DateTimeOffset.MinValue;
 
     public event Action<ListenerState>? StateChanged;
+
+    /// <summary>An announcement was spoken (its id), so the backend can be told.</summary>
+    public event Action<int>? Announced;
+
+    private (int Id, string Text, DateTimeOffset Queued)? _announcement;
+
+    /// <summary>Announcements older than this when V.A.R.A. is finally free are dropped (the next reply
+    /// mentions them instead).</summary>
+    internal static readonly TimeSpan AnnouncementMaxWait = TimeSpan.FromMinutes(15);
 
     /// <summary>Something the user should know about (shown as a tray notification).</summary>
     public event Action<string>? Problem;
@@ -120,6 +135,84 @@ public sealed class VoiceLoop
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Say <paramref name="spoken"/> if you're active (<paramref name="activeElsewhere"/>: the backend saw
+    /// you in the chat page or another client). Returns false when it won't be spoken (paused, or you're
+    /// not around), so the caller can show a notification instead.
+    /// </summary>
+    public bool Announce(int id, string spoken, bool activeElsewhere)
+    {
+        lock (_gate)
+        {
+            if (_paused)
+            {
+                return false;
+            }
+            var busy = _state is ListenerState.Capturing or ListenerState.Thinking or ListenerState.Speaking;
+            var recent = DateTimeOffset.Now - _lastExchange <= TimeSpan.FromMinutes(_settings.ConversationIdleMinutes);
+            if (!busy && !recent && !activeElsewhere)
+            {
+                Log.Info($"Announcement {id} not spoken: nobody is around");
+                return false;
+            }
+            _announcement = (id, spoken, DateTimeOffset.Now);
+            if (_state == ListenerState.Listening)
+            {
+                StartAnnouncementLocked();
+            }
+            else
+            {
+                Log.Info($"Announcement {id} waits until V.A.R.A. is free");
+            }
+            return true;
+        }
+    }
+
+    /// <summary>Speak the waiting announcement, then listen once for an answer. Call with the lock held.</summary>
+    private void StartAnnouncementLocked()
+    {
+        if (_announcement is not { } announcement)
+        {
+            return;
+        }
+        _announcement = null;
+        if (DateTimeOffset.Now - announcement.Queued > AnnouncementMaxWait)
+        {
+            Log.Info($"Announcement {announcement.Id} dropped: it waited too long");
+            return;
+        }
+        Log.Info($"Speaking announcement {announcement.Id}");
+        _turn++;
+        var turn = _turn;
+        _replyCts = new CancellationTokenSource();
+        var ct = _replyCts.Token;
+        _wake.Reset();
+        SetState(ListenerState.Speaking);
+        CurrentReply = Task.Run(async () =>
+        {
+            try
+            {
+                _chimes.Listening();
+                _voice.Say($"Heads up. {announcement.Text}");
+                _voice.Say("Want the details?");
+                await _voice.WaitUntilIdleAsync(ct);
+                Announced?.Invoke(announcement.Id);
+                lock (_gate)
+                {
+                    if (turn == _turn && !_paused)
+                    {
+                        _lastExchange = DateTimeOffset.Now; // an answer continues this conversation
+                        BeginCapture(followUp: true);
+                    }
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                // Interrupted by "VARA" or by pausing.
+            }
+        }, CancellationToken.None);
     }
 
     public async Task RunAsync(ChannelReader<short[]> chunks, CancellationToken ct)
@@ -347,6 +440,7 @@ public sealed class VoiceLoop
             _wake.Reset(); // so the "VARA" just handled can't trigger again
             SetState(ListenerState.Listening);
             Log.Info("Listening for VARA");
+            StartAnnouncementLocked(); // one that arrived while V.A.R.A. was busy
         }
     }
 

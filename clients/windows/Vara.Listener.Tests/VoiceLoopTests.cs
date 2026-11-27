@@ -235,4 +235,96 @@ public class VoiceLoopTests
         Assert.Equal(ListenerState.Listening, loop.State);
         Assert.Empty(chimes.Played);
     }
+
+    private const string Alert = "Sunday scores 72 out of 100: pressure drops 22 hectopascals by Sunday night.";
+
+    [Fact]
+    public async Task An_alert_is_spoken_when_you_are_active_and_waits_for_an_answer()
+    {
+        var (loop, _, voice, _) = Make(new FakeBackend("", true, ""));
+        var announced = new List<int>();
+        loop.Announced += announced.Add;
+
+        Assert.True(loop.Announce(7, Alert, activeElsewhere: true));
+        await loop.CurrentReply;
+
+        Assert.Equal(new[] { $"Heads up. {Alert}", "Want the details?" }, voice.Said);
+        Assert.Equal(new[] { 7 }, announced);
+        Assert.Equal(ListenerState.Capturing, loop.State); // the answer needs no "VARA"
+    }
+
+    [Fact]
+    public async Task A_yes_after_an_alert_goes_to_chat()
+    {
+        var backend = new FakeBackend("yes please", false, "yes please", "Sunday night a front comes through.");
+        var (loop, _, voice, _) = Make(backend);
+
+        loop.Announce(7, Alert, activeElsewhere: true);
+        await loop.CurrentReply;
+        for (var i = 0; i < 10; i++)
+        {
+            loop.Process(Speech);
+        }
+        for (var i = 0; i < 60 && loop.State == ListenerState.Capturing; i++)
+        {
+            loop.Process(Silence);
+        }
+        await loop.CurrentReply;
+
+        Assert.Equal("yes please", Assert.Single(backend.Asked).Text);
+        Assert.Contains("Sunday night a front comes through.", voice.Said);
+    }
+
+    [Fact]
+    public void An_alert_is_not_spoken_to_an_empty_room_or_while_paused()
+    {
+        var (loop, _, voice, _) = Make(new FakeBackend("", true, ""));
+
+        Assert.False(loop.Announce(7, Alert, activeElsewhere: false));
+        loop.Paused = true;
+        Assert.False(loop.Announce(8, Alert, activeElsewhere: true));
+        Assert.Empty(voice.Said);
+    }
+
+    [Fact]
+    public async Task An_alert_never_interrupts_a_reply_it_waits_for_it()
+    {
+        var backend = new FakeBackend("VARA, what time is it?", true, "what time is it?", "Ten past four.");
+        var (loop, wake, voice, _) = Make(backend);
+
+        // Arrives while V.A.R.A. is listening to the request.
+        for (var i = 0; i < 20; i++)
+        {
+            loop.Process(Silence);
+        }
+        wake.Scores.Enqueue(0.97f);
+        loop.Process(Speech);
+        Assert.True(loop.Announce(7, Alert, activeElsewhere: false)); // busy counts as active
+        Assert.Empty(voice.Said);
+        for (var i = 0; i < 10; i++)
+        {
+            loop.Process(Speech);
+        }
+        for (var i = 0; i < 40 && loop.State == ListenerState.Capturing; i++)
+        {
+            loop.Process(Silence);
+        }
+        await loop.CurrentReply; // the reply, which then starts the announcement
+        await loop.CurrentReply;
+
+        Assert.Equal(new[] { "Ten past four.", $"Heads up. {Alert}", "Want the details?" }, voice.Said);
+    }
+
+    [Fact]
+    public async Task Talking_to_vara_recently_counts_as_active()
+    {
+        var backend = new FakeBackend("VARA, hello", true, "hello", "Hi.");
+        var (loop, wake, voice, _) = Make(backend);
+
+        await SayVaraAndRequest(loop, wake);
+        Assert.True(loop.Announce(7, Alert, activeElsewhere: false));
+        await loop.CurrentReply;
+
+        Assert.Contains($"Heads up. {Alert}", voice.Said);
+    }
 }

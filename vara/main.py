@@ -34,6 +34,8 @@ from vara.search.service import SearxngService
 from vara.tts import KokoroSynthesizer, Synthesizer
 from vara.voice import Transcriber, WhisperTranscriber
 from vara.voice_api import voice
+from vara.weather.watch import WeatherWatch
+from vara.weather_api import weather as weather_routes
 
 WEB_DIR = Path(__file__).parent / "web"
 
@@ -99,6 +101,7 @@ def create_app(
     markets=None,
     deals=None,
     actions: ActionRegistry | None = None,
+    weather=None,
 ) -> FastAPI:
     settings = settings or get_settings()
     search_service = SearxngService(
@@ -125,6 +128,10 @@ def create_app(
                     maintain_watches(app.state.db, app.state.deals, app.state.events, stop)
                 )
             )
+        # The weather watch checks the forecast every few hours (only when started for real with a
+        # location set; tests pass their own watch and drive it themselves).
+        if weather is None and app.state.weather is not None:
+            tasks.append(asyncio.create_task(app.state.weather.run(stop)))
         if settings.voice_warm_up:
             tasks.append(asyncio.create_task(_warm_up_voice(app, settings)))
         yield
@@ -184,6 +191,13 @@ def create_app(
     else:
         app.state.deals = None
 
+    if weather is not None:
+        app.state.weather = weather
+    elif settings.weather_latitude is not None and settings.weather_longitude is not None:
+        app.state.weather = WeatherWatch(settings, db, app.state.events)
+    else:
+        app.state.weather = None
+
     # The agent loop and its typed actions (Phase 5). Runs left open by a stopped server are closed.
     def agent_context(options: RunOptions) -> ActionContext:
         return ActionContext(
@@ -192,6 +206,7 @@ def create_app(
             web=app.state.web,
             markets=app.state.markets,
             deals=app.state.deals,
+            weather=app.state.weather,
             now=options.client_time,
             timezone=options.client_timezone,
         )
@@ -218,4 +233,5 @@ def create_app(
     app.include_router(deals_routes)
     app.include_router(documents_routes)
     app.include_router(agent_routes)
+    app.include_router(weather_routes)
     return app

@@ -173,6 +173,44 @@ async def stop_price_watch(ctx: ActionContext, params: Product) -> ActionResult:
     return ActionResult(f"Stopped watching: {', '.join(stopped)}.")
 
 
+async def weather_outlook(ctx: ActionContext, _params: NoParams) -> ActionResult:
+    from datetime import UTC, datetime, timedelta
+
+    from vara.weather.openmeteo import WeatherUnavailable
+
+    watch = ctx.weather
+    outlook = watch.latest_outlook()
+    fetched = datetime.fromisoformat(outlook["fetched_at"]) if outlook else None
+    if fetched is None or datetime.now(UTC) - fetched > timedelta(hours=6):
+        try:
+            outlook = await watch.check()
+        except WeatherUnavailable as exc:
+            if outlook is None:
+                raise ActionFailed(str(exc)) from exc
+    header = (
+        f"Weather outlook for {outlook['place']} (Open-Meteo forecast, fetched "
+        f"{outlook['fetched_at'][:16].replace('T', ' ')} UTC). Risk is for the shifts that tend to "
+        "set off the user's sinus trouble: 0 means calm, 60 or more gets an alert."
+    )
+    lines = [header]
+    for day in outlook["days"]:
+        weather = ", ".join(
+            part
+            for part in (
+                f"high {day['high_f']}°F" if day["high_f"] is not None else "",
+                f"low {day['low_f']}°F" if day["low_f"] is not None else "",
+                f"rain chance up to {day['rain_chance']}%"
+                if day["rain_chance"] is not None
+                else "",
+            )
+            if part
+        )
+        lines.append(f"- {day['date']}: {day['summary']} ({weather})")
+    if outlook.get("stale"):
+        lines.append(f"(This is from an older forecast: {outlook.get('error')})")
+    return ActionResult("\n".join(lines), {"days": [d["score"] for d in outlook["days"]]})
+
+
 BUILTIN_ACTIONS = [
     Action(
         "current_time",
@@ -218,6 +256,17 @@ BUILTIN_ACTIONS = [
         describe=lambda p: f'Check prices for "{p.product}".',
         timeout=60.0,
         needs="deals",
+    ),
+    Action(
+        "weather_outlook",
+        "The weather where the user lives for today and the next two days: highs, lows, rain, and a "
+        "0-100 risk score for the shifts that set off their sinus trouble (cold fronts, pressure swings, "
+        "big temperature and dew-point drops). Use it for any weather question about their area.",
+        NoParams,
+        Risk.READ_ONLY,
+        weather_outlook,
+        describe=lambda _p: "Check the weather outlook.",
+        needs="weather",
     ),
     Action(
         "list_price_watches",

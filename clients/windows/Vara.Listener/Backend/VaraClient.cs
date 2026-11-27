@@ -15,6 +15,13 @@ public sealed record Transcript(
 
 public sealed record ChatResult(int ConversationId, string Provider, string? Model);
 
+/// <summary>A weather alert from the backend's live events (<c>weather_alert</c>).</summary>
+public sealed record WeatherAlert(
+    [property: JsonPropertyName("id")] int Id,
+    [property: JsonPropertyName("spoken")] string Spoken,
+    [property: JsonPropertyName("text")] string Text,
+    [property: JsonPropertyName("active")] bool Active);
+
 /// <summary>An error from the backend, with a message fit to show (or say) to the user.</summary>
 public sealed class BackendException(string message, HttpStatusCode? status = null, Exception? inner = null)
     : Exception(message, inner)
@@ -101,6 +108,59 @@ public sealed class VaraClient(HttpClient http) : IBackend
             }
         }
         return result ?? throw new BackendException("The reply stopped before it finished.");
+    }
+
+    /// <summary>
+    /// Follow the backend's live events (/v1/events) until <paramref name="ct"/> is cancelled, passing each
+    /// weather alert to <paramref name="onAlert"/>. Reconnects after a dropped connection or a restart.
+    /// </summary>
+    public static async Task FollowAlertsAsync(string baseUrl, Action<WeatherAlert> onAlert, CancellationToken ct)
+    {
+        // A separate client: the stream stays open for hours, past the normal request timeout.
+        using var events = new HttpClient { BaseAddress = new Uri(baseUrl.TrimEnd('/') + "/"), Timeout = Timeout.InfiniteTimeSpan };
+        var wait = TimeSpan.FromSeconds(5);
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                using var response = await events.GetAsync("v1/events", HttpCompletionOption.ResponseHeadersRead, ct);
+                response.EnsureSuccessStatusCode();
+                Log.Info("Following live events for alerts");
+                wait = TimeSpan.FromSeconds(5);
+                await using var stream = await response.Content.ReadAsStreamAsync(ct);
+                await foreach (var (name, data) in ServerSentEvents.ReadAsync(stream, ct))
+                {
+                    if (name == "weather_alert" && JsonSerializer.Deserialize<WeatherAlert>(data) is { } alert)
+                    {
+                        onAlert(alert);
+                    }
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception ex) when (ex is HttpRequestException or IOException or JsonException)
+            {
+                Log.Warn($"Live events: {ex.Message}; reconnecting in {wait.TotalSeconds:0} s");
+            }
+            try
+            {
+                await Task.Delay(wait, ct);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+            wait = TimeSpan.FromSeconds(Math.Min(60, wait.TotalSeconds * 2));
+        }
+    }
+
+    /// <summary>Tell the backend an alert was said out loud, so the next reply gives details if asked.</summary>
+    public async Task MarkAnnouncedAsync(int alertId, CancellationToken ct = default)
+    {
+        using var response = await Send(() => http.PostAsync($"v1/weather/alerts/{alertId}/announced", null, ct));
+        await EnsureSuccess(response, ct);
     }
 
     /// <summary>The IANA name (e.g. America/New_York) that phones and browsers also use, else Windows' name.</summary>

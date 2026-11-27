@@ -85,6 +85,8 @@ public sealed class TrayApp : ApplicationContext
         _loop = new VoiceLoop(_settings, _detector, client, _voice, new Chimes());
         _loop.StateChanged += state => _ui.Post(_ => ShowState(state), null);
         _loop.Problem += message => _ui.Post(_ => Notify(message, ToolTipIcon.Warning), null);
+        _loop.Announced += id => _ = MarkAnnouncedAsync(client, id);
+        _ = VaraClient.FollowAlertsAsync(_settings.BackendUrl, OnAlert, _stop.Token);
         await ListenAsync();
     }
 
@@ -190,6 +192,31 @@ public sealed class TrayApp : ApplicationContext
         catch (Exception ex)
         {
             Log.Warn($"Checking the default microphone: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// A weather alert: spoken if you're around (see <see cref="VoiceLoop.Announce"/>), otherwise a
+    /// notification, so nothing talks into an empty room or wakes you up.
+    /// </summary>
+    private void OnAlert(WeatherAlert alert)
+    {
+        Log.Info($"Weather alert {alert.Id} (you're {(alert.Active ? "active" : "not active")} per the server)");
+        if (_loop?.Announce(alert.Id, alert.Spoken, alert.Active) != true)
+        {
+            _ui.Post(_ => Notify(alert.Spoken, ToolTipIcon.Info), null);
+        }
+    }
+
+    private static async Task MarkAnnouncedAsync(VaraClient client, int id)
+    {
+        try
+        {
+            await client.MarkAnnouncedAsync(id);
+        }
+        catch (BackendException ex)
+        {
+            Log.Warn($"Couldn't mark alert {id} as spoken: {ex.Message}");
         }
     }
 

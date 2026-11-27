@@ -57,6 +57,7 @@ class ActionContext:
     web: Any = None
     markets: Any = None
     deals: Any = None
+    weather: Any = None  # the weather watch, when a location is set
     now: datetime | None = None  # the asking device's clock, when it sent one
     timezone: str | None = None
 

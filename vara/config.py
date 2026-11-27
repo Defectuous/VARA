@@ -118,6 +118,39 @@ class Settings(BaseSettings):
     agent_approval_timeout_seconds: float = 600.0
     agent_max_running: int = 3
 
+    # Weather watch (vara/weather/): warns a day or three before the shifts that tend to set off the
+    # owner's sinus trouble (cold fronts, pressure swings, big temperature and dew-point drops, rain).
+    # Off until a location is set. Only the latitude and longitude leave this PC (to Open-Meteo).
+    weather_latitude: float | None = None
+    weather_longitude: float | None = None
+    weather_place: str = ""  # what alerts call it, e.g. "Columbus"
+    weather_timezone: str = ""  # e.g. "America/New_York"; empty uses this PC's time zone
+    weather_check_hours: float = 3.0
+    # Alert when a day's risk reaches weather_alert_score, or rises weather_alert_jump points since the
+    # last alert; otherwise at most one alert a day. Quiet hours (local, may wrap midnight) hold back
+    # Discord messages until they end; the voice listener still tells you if you're talking to V.A.R.A.
+    weather_alert_score: int = 60
+    weather_alert_jump: int = 20
+    weather_quiet_hours: str = "05:30-12:30"
+    # You count as active (so the listener speaks an alert) within this many minutes of an exchange.
+    weather_active_minutes: float = 10.0
+    weather_pressure_drop_hpa: float = 15.0  # within 24 hours
+    weather_pressure_rise_hpa: float = 15.0
+    weather_temp_drop_f: float = 15.0
+    weather_dewpoint_drop_f: float = 15.0
+    weather_rain_chance: float = 50.0  # percent, within 24 hours after a pressure drop
+    weather_swing_rise_hpa: float = 20.0  # from a low, within 48 hours
+    # Score weights by trigger, as JSON, e.g. {"swing": 40}; unset ones keep vara/weather/detect.py's.
+    weather_weights: dict[str, float] = {}
+    weather_checklist: list[str] = [
+        "saline rinse",
+        "run the humidifier",
+        "drink more water",
+        "wash hands at work",
+        "wear layers on the dock",
+    ]
+    weather_keep_days: int = 365  # forecast snapshots older than this are deleted
+
     # Ollama models `python -m vara eval` tests when none are named, comma-separated. Empty tests
     # only `ollama_model`.
     eval_models: str = ""

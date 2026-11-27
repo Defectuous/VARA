@@ -478,6 +478,78 @@ with exactly what it will do and its arguments: **Approve** or **Reject**, with 
 appear for any run, including ones started from another window or by voice. **Pause agent** is the pause
 switch; **Stop** cancels the reply and its run.
 
+## Weather watch
+
+V.A.R.A. watches the forecast and warns you a day or three before the weather shifts that tend to come
+right before a sinus infection: cold fronts (a big pressure drop with rain behind it), fast pressure swings,
+and big temperature and dew-point drops. This is a personal early-warning tool, not medical advice.
+
+It's off until a location is set in `.env`:
+
+```
+VARA_WEATHER_LATITUDE=39.96
+VARA_WEATHER_LONGITUDE=-83.00
+VARA_WEATHER_PLACE=Columbus
+VARA_WEATHER_TIMEZONE=America/New_York
+```
+
+Every 3 hours V.A.R.A. fetches the 7-day forecast from [Open-Meteo](https://open-meteo.com) (free, no key;
+only the latitude and longitude leave this PC) and stores it, keeping the history. It then scores today
+and the next two days from 0 to 100, counting only what's still ahead, with the reasons in plain words:
+
+```
+Sunday: 72/100. Pressure drops 22 hPa (1018 → 996) by Sunday night (9 PM); rain likely (95%) from Sunday afternoon.
+```
+
+| Trigger | Default | Notes |
+| --- | --- | --- |
+| Pressure drop | 15 hPa in 24 h | `VARA_WEATHER_PRESSURE_DROP_HPA` |
+| Pressure rise | 15 hPa in 24 h | `VARA_WEATHER_PRESSURE_RISE_HPA` |
+| Temperature drop | 15°F in 24 h | `VARA_WEATHER_TEMP_DROP_F` |
+| Dew point drop (drier air) | 15°F in 24 h | `VARA_WEATHER_DEWPOINT_DROP_F` |
+| Rain after a pressure drop | 50% within 24 h | `VARA_WEATHER_RAIN_CHANCE` |
+| Swing: a low, then a fast rise | 20 hPa within 48 h | `VARA_WEATHER_SWING_RISE_HPA`; counted at the peak |
+
+Each trigger adds its weight (swing 35, pressure drop 30, pressure rise 20, temperature 20, dew point 15,
+rain 15), scaled up to 1.5 times for bigger changes. Change weights with `VARA_WEATHER_WEIGHTS`, e.g.
+`{"swing": 40}`.
+
+**Alerts.** An alert goes out when a day reaches 60 (`VARA_WEATHER_ALERT_SCORE`). After that, at most one a
+day, and never twice for the same day, unless the risk climbs 20 more points (`VARA_WEATHER_ALERT_JUMP`).
+Each one ends with the checklist (`VARA_WEATHER_CHECKLIST`): saline rinse, run the humidifier, drink more
+water, wash hands at work, wear layers on the dock. It reaches you three ways:
+
+- **By voice, when you're using V.A.R.A.** If you've talked to her (by voice, the chat page, anything) in
+  the last 10 minutes (`VARA_WEATHER_ACTIVE_MINUTES`), or you're mid-conversation, the voice listener says
+  "Heads up. Sunday scores 72 out of 100: ... Want the details?" and listens for your answer without the
+  wake word. Say "yes" or ask about it, and she explains; say nothing and she drops it. She never interrupts
+  a reply: an alert that arrives mid-answer waits until she's done. When you're not around she doesn't
+  speak; you get a silent tray notification instead.
+- **Discord**, if you add a webhook: `uv run python -m vara weather discord-webhook` (the URL is stored in
+  the credential store). Not during quiet hours (`VARA_WEATHER_QUIET_HOURS=05:30-12:30`, after the night
+  shift): those wait until quiet hours end, so a warning arrives in the early afternoon before a shift.
+- **In V.A.R.A.'s next reply**, once, if you haven't heard it yet.
+
+You can also ask: "anything I should be ready for this week?" uses the `weather_outlook` tool.
+
+```powershell
+uv run python -m vara weather outlook       # fetch and show the 3-day risk
+uv run python -m vara weather check         # the same, and raise an alert if it calls for one
+uv run python -m vara weather test-alert    # a "(Test)" alert through every channel (V.A.R.A. running)
+```
+
+| Endpoint | What it does |
+| --- | --- |
+| `GET /v1/weather/outlook` | The 3-day risk, triggers, highs, lows, and rain chance (`refresh=true` fetches now) |
+| `POST /v1/weather/check` | Fetch now and alert if needed |
+| `GET /v1/weather/alerts` | Recent alerts and where each went |
+| `POST /v1/weather/alerts/test` | A test alert |
+| `POST /v1/weather/alerts/{id}/announced` | The voice listener said it out loud |
+
+Not yet: the symptom log, local illness data (CDC wastewater and flu reports), the combined risk score,
+and the correlation report (see the roadmap). Open-Meteo's pollen data is Europe-only, so there's none
+for Columbus.
+
 ## Answer-quality evals
 
 `pytest` checks the code; the evals check the answers. With V.A.R.A. running:

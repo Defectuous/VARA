@@ -252,6 +252,22 @@ typed, approved, audited, and reversible.
     itself without the owner's review.
   - Order: detection, testing, and rollback for configuration and dependency upgrades first; code changes
     and the approval screen after that.
+- [ ] **Weather and illness early warning (SinusWatch).** The owner's build prompt is
+  `prompts/sinus-watch-build-prompt.md`; it's built into V.A.R.A. instead of as a separate Raspberry Pi app.
+  - [x] Steps 1 and 2 (2026-11-27): Open-Meteo forecasts every 3 hours with history kept, the cold-front
+    and swing detector, a 3-day 0-100 risk with reasons, alerts by voice when the owner is active (with
+    "Want the details?"), Discord outside quiet hours, the next reply, and the `weather_outlook` tool.
+  - [ ] Step 3: symptom log (`log --score 0-5`, by voice too: "VARA, sinus score 3") and backfill of past
+    illnesses with the archive weather for the 7 days before each.
+  - [ ] Step 4: illness activity for Columbus / Franklin County: CDC NWSS wastewater (COVID, flu A, RSV) and
+    FluView ILINet for HHS Region 5 or Ohio; check each endpoint first. Weekly data, fetched daily at most.
+  - [ ] Step 5: one risk score combining weather and illness, weights in settings.
+  - [ ] Step 6: the correlation report: which signals came before each logged onset, compared with ordinary
+    days; suggested thresholds after 3 onsets (never applied automatically); an HTML timeline.
+  - [ ] Step 7 (optional): a dashboard section in the chat page.
+  - Open question: the prompt's sample week (1011 → 1035 hPa in about 40 h, then down 28 in a day) doesn't
+    appear in Open-Meteo's Columbus history. The closest real weeks are 2025-11-28 to 12-02 and 2026-01-24.
+    The owner's illness dates will settle which signals matter.
 - [ ] **Maybe later: learned model routing.** Not needed now: `vara/reasoning.py` already routes by rules.
   Revisit if those rules start sending questions to the wrong model. The reference design is RouteLLM
   (https://github.com/lm-sys/RouteLLM), which trains a classifier to choose between a strong and a weak

@@ -2,6 +2,7 @@ import argparse
 import getpass
 import json
 import logging
+import sys
 from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
@@ -100,6 +101,74 @@ def run_evals(settings, args) -> int:
     return 1 if worse else 0
 
 
+def run_weather(settings, action: str, parser) -> int:
+    import asyncio
+
+    import httpx
+
+    from vara.weather.openmeteo import WeatherUnavailable
+    from vara.weather.watch import DISCORD_SECRET, WeatherWatch
+
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")  # the outlook has arrows and degree signs
+    if action == "discord-webhook":
+        # Typed, not passed as an argument, so the URL doesn't end up in shell history.
+        url = getpass.getpass(
+            "Discord webhook URL (Server Settings > Integrations > Webhooks; input is hidden): "
+        ).strip()
+        if not url.startswith("https://discord.com/api/webhooks/"):
+            parser.error("that doesn't look like a Discord webhook URL")
+        set_secret(DISCORD_SECRET, url)
+        print("Saved in the credential store. Try it: python -m vara weather test-alert")
+        return 0
+    if action == "remove-discord-webhook":
+        delete_secret(DISCORD_SECRET)
+        print("Discord webhook removed")
+        return 0
+    if action == "test-alert":
+        try:
+            response = httpx.post(
+                f"http://127.0.0.1:{settings.port}/v1/weather/alerts/test", timeout=60.0
+            )
+        except httpx.HTTPError:
+            print("V.A.R.A. isn't running; start it with .\\start-vara.ps1 and try again")
+            return 2
+        if response.status_code != 200:
+            print(response.json().get("detail", response.text))
+            return 1
+        alert = response.json()
+        print(alert["text"])
+        print(f"\nSpoken: {alert['spoken']}")
+        sent = "sent" if alert["discord_sent_at"] else alert["discord_error"] or "not set up"
+        print(f"Discord: {sent}")
+        return 0
+    if settings.weather_latitude is None or settings.weather_longitude is None:
+        print("Set VARA_WEATHER_LATITUDE and VARA_WEATHER_LONGITUDE (in .env) first.")
+        return 2
+    db = Database(settings.database_path)
+    db.upgrade()
+    watch = WeatherWatch(settings, db)
+
+    async def go() -> int:
+        try:
+            outlook = await watch.check()
+        except WeatherUnavailable as exc:
+            print(exc)
+            return 1
+        print(f"{outlook['place']}, forecast fetched {outlook['fetched_at'][:16]} UTC")
+        for day in outlook["days"]:
+            print(f"  {day['summary']}")
+            print(
+                f"    high {day['high_f']}°F, low {day['low_f']}°F, rain up to {day['rain_chance']}%"
+            )
+        if action == "check":
+            alert = await watch.evaluate(outlook)
+            print("\nAlert raised:\n" + alert.text if alert else "\nNo alert needed.")
+        return 0
+
+    return asyncio.run(go())
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="vara", description="V.A.R.A. backend")
     commands = parser.add_subparsers(dest="command")
@@ -117,6 +186,13 @@ def main() -> None:
     search.add_argument("action", choices=["install", "update", "status"])
     deals = commands.add_parser("deals", help="store or remove the optional Best Buy API key")
     deals.add_argument("action", choices=["bestbuy-key", "remove-bestbuy-key"])
+    weather = commands.add_parser("weather", help="the weather watch: outlook, alerts, Discord")
+    weather.add_argument(
+        "action",
+        choices=["outlook", "check", "test-alert", "discord-webhook", "remove-discord-webhook"],
+        help="outlook: fetch and show the 3-day risk; check: also raise an alert if it calls for one; "
+        "test-alert: send a test alert through every channel (needs V.A.R.A. running)",
+    )
     evaluate = commands.add_parser(
         "eval", help="grade the models' answers on a fixed question set (needs V.A.R.A. running)"
     )
@@ -207,6 +283,8 @@ def main() -> None:
         else:
             delete_secret("bestbuy")
             log.info("Best Buy key removed")
+    elif args.command == "weather":
+        raise SystemExit(run_weather(settings, args.action, parser))
     elif args.command == "eval":
         raise SystemExit(run_evals(settings, args))
     else:
