@@ -680,19 +680,33 @@ def _summary(routed: RoutedEvent, done: Completed) -> dict:
 
 
 @v1.get("/providers")
-def list_providers(request: Request) -> dict:
+async def list_providers(request: Request) -> dict:
+    """The configured providers and their models (what each is good at is in `model_labels`), and the
+    cloud providers that would be offered once their key is stored (`unconfigured`)."""
+    from vara import catalog
+
     router = _router(request)
+    for p in router.providers:
+        if refresh := getattr(p, "refresh_models", None):
+            await refresh()
+    configured = {p.name for p in router.providers}
     return {
         "privacy_mode": router.privacy_mode,
-        "model_labels": request.app.state.settings.model_labels,
+        "model_labels": catalog.labels(request.app.state.settings.model_labels),
         "providers": [
             {
                 "name": p.name,
+                "label": catalog.PROVIDER_LABELS.get(p.name, p.name),
                 "default_model": p.default_model,
                 "models": list(getattr(p, "models", None) or [p.default_model]),
                 "local": p.capabilities.local,
             }
             for p in router.providers
+        ],
+        "unconfigured": [
+            {"name": c.name, "label": c.label, "models": [m for m, _ in c.models]}
+            for c in catalog.CLOUD
+            if c.name not in configured
         ],
     }
 

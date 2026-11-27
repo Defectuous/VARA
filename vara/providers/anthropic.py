@@ -15,7 +15,17 @@ from vara.providers.base import (
 )
 
 # Server-side fallback re-runs a request on another Claude model if a safety classifier declines it.
+# Only these models take it (Haiku 5.5, for one, has no server-side fallback and would refuse the request).
 _FALLBACK_BETA = "server-side-fallback-2026-07-01"
+_FALLBACK_MODELS = frozenset(
+    {
+        "claude-fable-5-2",
+        "claude-fable-5-1",
+        "claude-opus-5-5",
+        "claude-opus-5",
+        "claude-sonnet-5-5",
+    }
+)
 
 
 def _api_messages(messages: Sequence[Message]) -> list[dict]:
@@ -59,9 +69,12 @@ class AnthropicProvider:
         default_model: str = "claude-opus-5-5",
         effort: str = "medium",
         max_tokens: int = 64000,
+        models: Sequence[str] = (),
         client: anthropic.AsyncAnthropic | None = None,
     ) -> None:
         self.default_model = default_model
+        # Models offered for a manual choice; the default always comes first.
+        self.models = list(dict.fromkeys([default_model, *models]))
         self._effort = effort
         self._max_tokens = max_tokens
         self._client = client or anthropic.AsyncAnthropic(api_key=api_key, timeout=120.0)
@@ -75,14 +88,17 @@ class AnthropicProvider:
         think: bool | None = None,
         tools: Sequence[ToolSpec] | None = None,
     ) -> dict:
+        name = model or self.default_model
         params = {
-            "model": model or self.default_model,
+            "model": name,
             "max_tokens": self._max_tokens,
             "messages": _api_messages(messages),
             "output_config": {"effort": self._effort},
-            "betas": [_FALLBACK_BETA],
-            "fallbacks": "default",
+            # Always a list: the stream call goes through the beta endpoint either way.
+            "betas": [_FALLBACK_BETA] if name in _FALLBACK_MODELS else [],
         }
+        if name in _FALLBACK_MODELS:
+            params["fallbacks"] = "default"
         if system:
             params["system"] = system
         if tools:

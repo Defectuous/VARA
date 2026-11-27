@@ -32,7 +32,7 @@ def _tiered(input: float, output: float, long_input: float, long_output: float, 
 # docs.perplexity.ai/docs/orchestrator/models). Kimi's pricing page didn't show its table, so Kimi models
 # have no price yet. A model whose price changes on a known date has a list of (from date, price).
 # Cached input is billed lower by every provider, but token counts here don't separate it out, so a
-# request that hit the cache is estimated a little high. Haiku 5.5's rate applies up to 100K tokens.
+# request that hit the cache is estimated a little high.
 _OPENAI_LONG = 272_001  # OpenAI: long context is more than 272K input tokens
 _XAI_LONG = 200_000  # xAI: the prompt reaches 200K tokens
 _GEMINI_LONG = 200_001  # Gemini 3.1 Pro: more than 200K prompt tokens
@@ -50,9 +50,10 @@ _DEEPSEEK_PRO = Price(1.32, 3.96, off_peak_half=True)
 
 _PRICES: dict[str, Price | tuple[tuple[date, Price], ...]] = {
     # Anthropic
+    "claude-fable-5-2": Price(8.00, 40.00),
     "claude-opus-5-5": Price(4.00, 20.00),
     "claude-sonnet-5-5": Price(2.00, 10.00),
-    "claude-haiku-5-5": Price(0.10, 0.50),
+    "claude-haiku-5-5": _tiered(0.10, 0.50, 0.50, 2.50, 100_001),
     # OpenAI
     "gpt-6.2-astra": _tiered(8.00, 40.00, 16.00, 60.00, _OPENAI_LONG),
     "gpt-6.2-sol": _tiered(2.00, 10.00, 4.00, 15.00, _OPENAI_LONG),

@@ -6,7 +6,7 @@ from pathlib import Path
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 
-from vara import retention
+from vara import catalog, retention
 from vara.actions import ActionContext, ActionRegistry, default_registry
 from vara.agent import AgentManager, RunOptions
 from vara.agent_api import agent as agent_routes
@@ -69,7 +69,7 @@ def _icon_route(name: str):
 # the provider's name), what errors call it, base URL, the setting holding its default model, context
 # length, and any adapter options.
 _OPENAI_COMPATIBLE = (
-    ("openai", "OpenAI", OPENAI_URL, "openai_model", 400_000, {}),
+    ("openai", "OpenAI", OPENAI_URL, "openai_model", 1_050_000, {}),
     ("xai", "xAI", XAI_URL, "xai_model", 500_000, {}),
     ("gemini", "Gemini", GEMINI_URL, "gemini_model", 1_048_576, {}),
     ("deepseek", "DeepSeek", DEEPSEEK_URL, "deepseek_model", 1_000_000, {"thinking_switch": True}),
@@ -91,7 +91,10 @@ def build_router(settings: Settings) -> ModelRouter:
     if key := get_api_key("anthropic"):
         providers.append(
             AnthropicProvider(
-                key, default_model=settings.anthropic_model, effort=settings.anthropic_effort
+                key,
+                default_model=settings.anthropic_model,
+                effort=settings.anthropic_effort,
+                models=catalog.models_for("anthropic", settings.anthropic_model),
             )
         )
     for name, label, base_url, model, context, extra in _OPENAI_COMPATIBLE:
@@ -104,6 +107,7 @@ def build_router(settings: Settings) -> ModelRouter:
                     base_url=base_url,
                     default_model=getattr(settings, model),
                     context_length=context,
+                    models=catalog.models_for(name, getattr(settings, model)),
                     **extra,
                 )
             )

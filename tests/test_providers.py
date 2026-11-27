@@ -393,3 +393,58 @@ def test_every_cloud_provider_registers_with_its_key(monkeypatch) -> None:
 
     assert [p.name for p in providers] == ["ollama", *names]
     assert all(p.capabilities.tools for p in providers)
+
+
+def test_cloud_providers_offer_their_catalog_models_default_first(monkeypatch) -> None:
+    from vara import catalog, main
+    from vara.config import Settings
+
+    monkeypatch.setattr(main, "get_api_key", lambda name: "key")
+
+    providers = {p.name: p for p in main.build_router(Settings(_env_file=None)).providers}
+
+    assert providers["anthropic"].models[0] == "claude-opus-5-5"
+    assert "claude-fable-5-2" in providers["anthropic"].models
+    assert providers["openai"].models == catalog.models_for("openai", "gpt-6.2-sol")
+    assert len(set(providers["gemini"].models)) == len(providers["gemini"].models)
+    for p in catalog.CLOUD:  # every catalog provider is wired up
+        assert p.name in providers
+
+
+def test_only_claude_models_with_server_fallback_ask_for_it() -> None:
+    provider = AnthropicProvider("unused", client=_FakeAnthropicClient())
+
+    haiku = provider.request_body(HELLO, model="claude-haiku-5-5")
+    fable = provider.request_body(HELLO, model="claude-fable-5-2")
+
+    assert "fallbacks" not in haiku and haiku["betas"] == []
+    assert fable["fallbacks"] == "default"
+
+
+def test_ollama_lists_every_installed_model_after_the_configured_ones() -> None:
+    tags = {"models": [{"name": "qwen3:14b"}, {"name": "gpt-oss:20b"}, {"name": "llama3.1:latest"}]}
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        return httpx.Response(200, json=tags)
+
+    client = httpx.AsyncClient(base_url="http://ollama", transport=httpx.MockTransport(handler))
+    provider = OllamaProvider(default_model="qwen3:14b", models=["llama3.1"], client=client)
+
+    async def refresh_twice() -> list[str]:
+        await provider.refresh_models()
+        return await provider.refresh_models()  # within max_age: not fetched again
+
+    assert asyncio.run(refresh_twice()) == ["qwen3:14b", "llama3.1", "gpt-oss:20b"]
+    assert calls == ["/api/tags"]
+
+
+def test_ollama_keeps_its_configured_models_when_the_server_is_down() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused")
+
+    client = httpx.AsyncClient(base_url="http://ollama", transport=httpx.MockTransport(handler))
+    provider = OllamaProvider(default_model="qwen3:14b", client=client)
+
+    assert asyncio.run(provider.refresh_models()) == ["qwen3:14b"]

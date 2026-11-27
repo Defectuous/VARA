@@ -91,9 +91,12 @@ class OpenAICompatibleProvider:
         context_length: int = 128_000,
         vision: bool = True,
         thinking_switch: bool = False,
+        models: Sequence[str] = (),
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self.name = name
+        # Models offered for a manual choice; the default always comes first.
+        self.models = list(dict.fromkeys([default_model, *models]))
         # Whether `think` is sent as DeepSeek's `thinking: {"type": "enabled" | "disabled"}`. Others
         # either can't turn reasoning off (Kimi K3, Gemini 4) or decide for themselves.
         self._thinking_switch = thinking_switch

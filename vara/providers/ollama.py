@@ -1,4 +1,5 @@
 import json
+import time
 import uuid
 from collections.abc import AsyncIterator, Sequence
 
@@ -42,12 +43,33 @@ class OllamaProvider:
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self.default_model = default_model
-        # Models offered for a manual choice; the default always comes first.
-        self.models = list(dict.fromkeys([default_model, *models]))
+        # Models offered for a manual choice: the default first, then the configured ones, then any other
+        # model installed on the Ollama server (see refresh_models).
+        self._configured = list(dict.fromkeys([default_model, *models]))
+        self.models = list(self._configured)
+        self._installed_checked = float("-inf")
         self.keep_alive = keep_alive
         self._client = client or httpx.AsyncClient(base_url=base_url, timeout=120.0)
         # Whether each model can reason ("thinking" capability), learned from /api/show.
         self._thinking: dict[str, bool] = {}
+
+    async def refresh_models(self, max_age: float = 300.0) -> list[str]:
+        """Add every model installed on the server (GET /api/tags) to `models`, at most every `max_age`
+        seconds. If the server can't be reached, the configured models are offered."""
+        now = time.monotonic()
+        if now - self._installed_checked < max_age:
+            return self.models
+        self._installed_checked = now
+        try:
+            response = await self._client.get("/api/tags", timeout=3.0)
+            installed = [m["name"] for m in response.json().get("models", [])]
+        except (httpx.HTTPError, ValueError, KeyError, TypeError, AttributeError):
+            return self.models
+        # Ollama names a model without a tag "name:latest"; keep the configured spelling.
+        configured = {m if ":" in m else f"{m}:latest" for m in self._configured}
+        extra = sorted(m for m in installed if m not in configured and m not in self._configured)
+        self.models = list(dict.fromkeys([*self._configured, *extra]))
+        return self.models
 
     def request_body(
         self,

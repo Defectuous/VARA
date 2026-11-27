@@ -315,18 +315,36 @@ async function loadProviders() {
     badge.className = `badge ${data.privacy_mode}`;
     const select = $("provider");
     select.length = 1;
+    for (const group of select.querySelectorAll("optgroup")) group.remove();
+    const blocked = data.privacy_mode === "local_only";
+    const addGroup = (label, models, makeOption) => {
+      const group = document.createElement("optgroup");
+      group.label = label;
+      for (const model of models) group.appendChild(makeOption(model));
+      select.appendChild(group);
+    };
     for (const p of data.providers) {
-      // One entry per model; the provider's default model keeps the plain provider name as its value.
-      for (const model of p.models || [p.default_model]) {
+      // One entry per model, grouped by provider; the provider's default model keeps the plain provider
+      // name as its value. The label says what the model is good at; the tag is shown on hover.
+      const note = !p.local && blocked ? " (cloud is off: privacy mode)" : "";
+      addGroup((p.label || p.name) + (p.local ? "" : " ☁") + note, p.models || [p.default_model], (model) => {
         const opt = document.createElement("option");
         opt.value = model === p.default_model ? p.name : `${p.name}|${model}`;
-        // A label from VARA_MODEL_LABELS says what the model is for; the tag is shown on hover.
-        const label = data.model_labels?.[model];
-        opt.textContent = (label || `${p.name} (${model})`) + (p.local ? "" : " ☁");
+        opt.textContent = data.model_labels?.[model] || model;
         opt.title = `${p.name}: ${model}`;
-        opt.disabled = !p.local && data.privacy_mode === "local_only";
-        select.appendChild(opt);
-      }
+        opt.disabled = !p.local && blocked;
+        return opt;
+      });
+    }
+    // Cloud providers without a key: shown so you know they're there, but can't be picked yet.
+    for (const p of data.unconfigured || []) {
+      addGroup(`${p.label} ☁ (no API key)`, p.models, (model) => {
+        const opt = document.createElement("option");
+        opt.textContent = data.model_labels?.[model] || model;
+        opt.title = `Store a "${p.name}" key in Credential Manager (service "vara") to use ${model}`;
+        opt.disabled = true;
+        return opt;
+      });
     }
     try { select.value = localStorage.getItem("vara.provider") || ""; } catch {}
     if (select.selectedOptions[0]?.disabled) select.value = "";

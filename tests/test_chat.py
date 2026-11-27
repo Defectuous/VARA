@@ -298,8 +298,25 @@ def test_providers_endpoint_defaults_models_to_the_default_model() -> None:
 
 
 def test_providers_endpoint_includes_model_labels() -> None:
-    labels = {"local-model": "Local · general"}
+    labels = {"local-model": "Local · general", "gpt-6-luna": "My own label"}
     router = ModelRouter([FakeProvider("local")], PrivacyMode.LOCAL_ONLY)
     client = TestClient(create_app(Settings(_env_file=None, model_labels=labels), router=router))
 
-    assert client.get("/v1/providers").json()["model_labels"] == labels
+    body = client.get("/v1/providers").json()
+
+    # The catalog labels every cloud model; VARA_MODEL_LABELS adds local ones and wins over the catalog.
+    assert body["model_labels"]["local-model"] == "Local · general"
+    assert body["model_labels"]["gpt-6-luna"] == "My own label"
+    assert body["model_labels"]["claude-fable-5-2"].startswith("Claude Fable 5.2 ·")
+    # Cloud providers without a key are listed so the menu can show them, greyed out.
+    unconfigured = {p["name"]: p["models"] for p in body["unconfigured"]}
+    assert "gemini-4-carbon" in unconfigured["gemini"]
+    assert set(unconfigured) == {
+        "anthropic",
+        "openai",
+        "xai",
+        "gemini",
+        "deepseek",
+        "kimi",
+        "perplexity",
+    }
