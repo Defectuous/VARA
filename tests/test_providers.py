@@ -164,3 +164,139 @@ def test_ollama_lists_the_default_model_first_without_duplicates() -> None:
     assert settings.ollama_model_list == ["qwen3:8b", "qwen3:14b"]
     provider = OllamaProvider(default_model="qwen3:8b", models=settings.ollama_model_list)
     assert provider.models == ["qwen3:8b", "qwen3:14b"]
+
+
+def _sse(chunks: list) -> str:
+    return "".join(f"data: {json.dumps(c)}\n\n" for c in chunks) + "data: [DONE]\n\n"
+
+
+def _openai(handler, name: str = "openai", label: str = "OpenAI"):
+    from vara.providers.openai_compat import OpenAICompatibleProvider
+
+    client = httpx.AsyncClient(base_url="http://api", transport=httpx.MockTransport(handler))
+    return OpenAICompatibleProvider(
+        name, "unused", label=label, base_url="http://api", default_model="gpt-5", client=client
+    )
+
+
+def test_openai_compatible_streams_text_and_usage() -> None:
+    sent = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent["path"] = request.url.path
+        sent.update(json.loads(request.content))
+        return httpx.Response(
+            200,
+            text=_sse(
+                [
+                    {"model": "gpt-5-2026", "choices": [{"delta": {"content": "Hi"}}]},
+                    {"model": "gpt-5-2026", "choices": [{"delta": {"content": " there"}}]},
+                    {"model": "gpt-5-2026", "choices": [{"delta": {}, "finish_reason": "stop"}]},
+                    {
+                        "model": "gpt-5-2026",
+                        "choices": [],
+                        "usage": {"prompt_tokens": 5, "completion_tokens": 2},
+                    },
+                ]
+            ),
+        )
+
+    events = drain(_openai(handler), system="be brief")
+
+    assert events == [TextDelta("Hi"), TextDelta(" there"), Completed("gpt-5-2026", "stop", 5, 2)]
+    assert sent["path"] == "/chat/completions"
+    assert sent["messages"][0] == {"role": "system", "content": "be brief"}
+    assert sent["stream_options"] == {"include_usage": True}
+
+
+def test_openai_compatible_assembles_tool_calls_from_pieces() -> None:
+    from vara.providers.base import ToolCall, ToolSpec
+
+    chunks = [
+        {
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "index": 0,
+                                "id": "call_1",
+                                "function": {"name": "web_search", "arguments": '{"que'},
+                            }
+                        ]
+                    }
+                }
+            ]
+        },
+        {
+            "choices": [
+                {"delta": {"tool_calls": [{"index": 0, "function": {"arguments": 'ry": "rain"}'}}]}}
+            ]
+        },
+        {"choices": [{"delta": {}, "finish_reason": "tool_calls"}]},
+    ]
+    sent = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.update(json.loads(request.content))
+        return httpx.Response(200, text=_sse(chunks))
+
+    tool = ToolSpec("web_search", "Search the web", {"type": "object"})
+    events = drain(_openai(handler, "xai", "xAI"), tools=[tool])
+
+    assert events[0] == ToolCall("call_1", "web_search", {"query": "rain"})
+    assert events[1].stop_reason == "tool_calls"
+    assert sent["tools"][0]["function"]["name"] == "web_search"
+
+
+def test_openai_compatible_sends_tool_turns_in_its_format() -> None:
+    from vara.providers.base import ToolCall
+
+    provider = _openai(lambda request: httpx.Response(200))
+    call = ToolCall("call_1", "web_search", {"query": "rain"})
+    body = provider.request_body(
+        [
+            Message("user", "rain?"),
+            Message("assistant", "", tool_calls=(call,)),
+            Message("tool", "No rain", tool_call_id="call_1", name="web_search"),
+        ]
+    )
+
+    assistant, tool_turn = body["messages"][1], body["messages"][2]
+    assert assistant["content"] is None
+    assert assistant["tool_calls"][0]["function"] == {
+        "name": "web_search",
+        "arguments": '{"query": "rain"}',
+    }
+    assert tool_turn == {"role": "tool", "tool_call_id": "call_1", "content": "No rain"}
+
+
+@pytest.mark.parametrize(
+    ("status", "message"),
+    [(401, "xAI rejected the API key"), (429, "xAI rate limit reached"), (500, "xAI error 500")],
+)
+def test_openai_compatible_http_errors_raise_provider_error(status: int, message: str) -> None:
+    provider = _openai(lambda request: httpx.Response(status, text="nope"), "xai", "xAI")
+
+    with pytest.raises(ProviderError, match=message):
+        drain(provider)
+
+
+def test_openai_compatible_unreachable_raises_provider_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("refused")
+
+    with pytest.raises(ProviderError, match="Could not reach the OpenAI API"):
+        drain(_openai(handler))
+
+
+def test_cloud_providers_register_only_with_a_key(monkeypatch) -> None:
+    from vara import main
+    from vara.config import Settings
+
+    keys = {"openai": "sk-test", "xai": "xai-test"}
+    monkeypatch.setattr(main, "get_api_key", keys.get)
+
+    names = [p.name for p in main.build_router(Settings()).providers]
+
+    assert names == ["ollama", "openai", "xai"]

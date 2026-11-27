@@ -89,6 +89,8 @@ Settings come from `VARA_*` environment variables or a local `.env` file (never 
 | `VARA_SYSTEM_PROMPT` | V.A.R.A. persona | Used when a request has no `system` of its own; `{date}` becomes today's date. A request's `system` replaces it (`""` sends none) |
 | `VARA_ANTHROPIC_MODEL` | `claude-opus-5-5` | |
 | `VARA_ANTHROPIC_EFFORT` | `medium` | `low`, `medium`, `high`, `xhigh`, or `max` |
+| `VARA_OPENAI_MODEL` | `gpt-5` | Used when the `openai` key is stored |
+| `VARA_XAI_MODEL` | `grok-4` | xAI's Grok; used when the `xai` key is stored |
 | `VARA_AGENT_MAX_STEPS` | `8` | Model turns an agent run may take before it must answer from what it has |
 | `VARA_AGENT_RUN_TIMEOUT_SECONDS` | `1200` | Time limit for a whole agent run, including waiting for approvals |
 | `VARA_AGENT_APPROVAL_TIMEOUT_SECONDS` | `600` | How long an approval request waits for your answer before it expires (and the action isn't done) |
@@ -101,6 +103,8 @@ API keys are not configuration. Store them in Windows Credential Manager under t
 ```powershell
 uv run --with keyring python -c "import keyring, getpass; keyring.set_password('vara', 'anthropic', getpass.getpass('Key: '))"
 ```
+
+Use the same command with `openai` (OpenAI) or `xai` (Grok) in place of `anthropic` for those providers.
 
 A cloud provider is enabled only when its key is present. Check with `GET /v1/providers`.
 

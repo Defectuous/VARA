@@ -27,6 +27,7 @@ from vara.price_watch import maintain_watches
 from vara.providers.anthropic import AnthropicProvider
 from vara.providers.base import ModelProvider
 from vara.providers.ollama import OllamaProvider
+from vara.providers.openai_compat import OPENAI_URL, XAI_URL, OpenAICompatibleProvider
 from vara.router import ModelRouter
 from vara.search.api import maintain, web
 from vara.search.client import SearxngClient
@@ -70,6 +71,28 @@ def build_router(settings: Settings) -> ModelRouter:
         providers.append(
             AnthropicProvider(
                 key, default_model=settings.anthropic_model, effort=settings.anthropic_effort
+            )
+        )
+    if key := get_api_key("openai"):
+        providers.append(
+            OpenAICompatibleProvider(
+                "openai",
+                key,
+                label="OpenAI",
+                base_url=OPENAI_URL,
+                default_model=settings.openai_model,
+                context_length=400_000,
+            )
+        )
+    if key := get_api_key("xai"):
+        providers.append(
+            OpenAICompatibleProvider(
+                "xai",
+                key,
+                label="xAI",
+                base_url=XAI_URL,
+                default_model=settings.xai_model,
+                context_length=256_000,
             )
         )
     return ModelRouter(providers, settings.privacy_mode)
