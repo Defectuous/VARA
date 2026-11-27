@@ -12,3 +12,6 @@ __pycache__/
 bin/
 obj/
 /clients/windows/publish/
+
+# Personal build prompts (health, schedule, location): kept on this PC only
+/prompts/
