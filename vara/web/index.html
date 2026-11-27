@@ -190,6 +190,9 @@
     <button id="menu" type="button" aria-label="Conversations">☰</button>
     <span id="conv-title">New chat</span>
     <span class="spacer"></span>
+    <label title="Who answers: V.A.R.A., or her Python coding agent, which writes, runs, and tests code in her projects folder (running code asks you first)">Agent
+      <select id="agent"><option value="chat">V.A.R.A.</option><option value="python">Python coder</option></select>
+    </label>
     <label class="switch" title="Let V.A.R.A. use tools (search, quotes, prices, memory). Anything that changes something asks you first."><input type="checkbox" id="use-tools"> Tools</label>
     <button id="pause" type="button" title="Stop every agent run now and refuse new ones until resumed">Pause agent</button>
     <label>Model
@@ -397,7 +400,7 @@ async function send(text, confirmCloud = false, existing = null) {
     messages: [{ role: "user", content: text }], conversation_id: state.conversationId, provider, model, confirm_cloud: confirmCloud,
     // This device's clock, so V.A.R.A. knows the time where you are.
     client_time: localIsoTime(), client_timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
-    client: CLIENT_ID, tools: $("use-tools").checked,
+    client: CLIENT_ID, tools: $("use-tools").checked, agent: $("agent").value,
   };
   const userEl = existing || addMessage("user", text);
   const replyEl = addMessage("assistant", "", "");
@@ -812,7 +815,7 @@ function showApproval(a) {
   card.className = "approval";
   card.dataset.approval = a.id;
   const risk = {
-    local_change: "changes V.A.R.A.'s data on this PC", external_effect: "does something outside this PC", financial: "involves money",
+    local_change: "changes V.A.R.A.'s data on this PC", run_code: "runs code on this PC, with your account's access", external_effect: "does something outside this PC", financial: "involves money",
   }[a.risk] || a.risk;
   card.innerHTML = `<div class="why">V.A.R.A. wants to do this (${escapeHtml(risk)}):</div><div class="what"></div>` +
     `<div class="why args"></div><div class="row"><input type="text" placeholder="Note (optional)" maxlength="500">` +
@@ -862,6 +865,15 @@ $("pause").onclick = async () => {
     showPaused((await api(resume ? "/v1/agent/resume" : "/v1/agent/pause", { method: "POST" })).paused);
   } catch (err) { alert(`Couldn't change it: ${err.message}`); }
 };
+// The Python coder always uses its tools, so the Tools switch doesn't apply to it.
+function agentChanged() {
+  const coder = $("agent").value === "python";
+  $("use-tools").disabled = coder;
+  $("input").placeholder = coder ? "Ask the Python coder: write, fix, test, explain, or analyse" : "Message V.A.R.A.";
+}
+try { $("agent").value = localStorage.getItem("vara.agent") || "chat"; } catch {}
+$("agent").onchange = (e) => { try { localStorage.setItem("vara.agent", e.target.value); } catch {} agentChanged(); };
+agentChanged();
 $("use-tools").checked = true;
 try { $("use-tools").checked = localStorage.getItem("vara.tools") !== "off"; } catch {}
 $("use-tools").onchange = (e) => { try { localStorage.setItem("vara.tools", e.target.checked ? "on" : "off"); } catch {} };

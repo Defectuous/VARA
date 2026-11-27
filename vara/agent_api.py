@@ -17,6 +17,7 @@ from vara.agent import (
     action_dict,
     run_dict,
 )
+from vara.coding.actions import CODING_TOOLS
 from vara.db.models import ActionRecord, ActionStatus, AgentRun
 from vara.reasoning import ReasoningMode, should_reason
 
@@ -71,6 +72,8 @@ async def start_run(body: RunRequest, request: Request) -> dict:
         client_time=body.client_time,
         client_timezone=body.client_timezone,
         max_steps=body.max_steps,
+        # The coding tools belong to the Python coding agent (chat with agent "python").
+        tools={a.name for a in manager.registry.all()} - CODING_TOOLS,
         think=should_reason(
             body.goal, spoken=False, mode=body.reasoning or request.app.state.settings.reasoning
         ),

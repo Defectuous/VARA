@@ -296,4 +296,6 @@ BUILTIN_ACTIONS = [
 
 
 def default_registry() -> ActionRegistry:
-    return ActionRegistry(list(BUILTIN_ACTIONS))
+    from vara.coding.actions import CODING_ACTIONS  # vara.coding imports vara.actions
+
+    return ActionRegistry([*BUILTIN_ACTIONS, *CODING_ACTIONS])

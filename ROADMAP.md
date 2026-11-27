@@ -217,13 +217,19 @@ Remaining: wake-word accuracy (model v5: about 63% of plain "VARA" from unfamili
 
 ## Next Implementation Session
 
-Phase 5: move chat's search and price checks onto the agent loop (Tools on by default) (check with the evals that answers don't get worse). Custom agents (**To Do**) build on it after that. Test the voice listener with real use (wake-word hit rate and false wake-ups at home) and keep improving the wake word. Still open from earlier: Phase 4 text extraction and keyword search for allowed folders; Phase 3's scheduled off-PC backup; a live check of each cloud adapter (OpenAI, xAI, Gemini, DeepSeek, Kimi, Perplexity) once its key is in Credential Manager.
+Phase 5: try the Python coding agent (`vara/coding/`, chat's Agent: Python coder) on real tasks with a local coder model and a cloud one, and compare. Then: move chat's search and price checks onto the agent loop (Tools on by default) (check with the evals that answers don't get worse). Custom agents (**To Do**) build on it after that. Test the voice listener with real use (wake-word hit rate and false wake-ups at home) and keep improving the wake word. Still open from earlier: Phase 4 text extraction and keyword search for allowed folders; Phase 3's scheduled off-PC backup; a live check of each cloud adapter (OpenAI, xAI, Gemini, DeepSeek, Kimi, Perplexity) once its key is in Credential Manager.
 
 ## To Do
 
 Goals that span several phases. Each one builds on the Phase 5 action layer, so everything it does stays
 typed, approved, audited, and reversible.
 
+- [x] **Python coding agent (2026-11-27).** Chat's Agent: Python coder (`vara/coding/`) writes, fixes, tests,
+  explains, and reviews Python and analyses data, only inside `data/projects/<name>` (each a git repo with a uv
+  environment). Reading and project edits run freely (edits are commits, so they can be undone); running code,
+  tests, and installs need approval each time (new risk levels `workspace_edit` and `run_code`). Programs get
+  no secrets and a time limit but aren't sandboxed. Not yet tried with a live model. Later: a real sandbox on
+  Linux (bubblewrap), importing a file from an allowed folder into a project, and showing diffs in the chat.
 - [ ] **V.A.R.A. builds custom agents when a request needs one.** When a request is bigger than a single
   answer or tool call (for example "watch these three sites and tell me when prices drop", or "research X
   and write me a summary every Monday"), V.A.R.A. designs a purpose-built agent for it: its goal, the tools

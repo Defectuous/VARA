@@ -8,7 +8,11 @@ audit trail, whatever happens to it.
 Each action declares a risk level:
 
 - read_only: looks things up; changes nothing. Runs without asking.
+- workspace_edit: changes files in one of V.A.R.A.'s own coding projects (data/projects). Runs without
+  asking; every change is a git commit there, so it can be undone.
 - local_change: changes V.A.R.A.'s own data on this PC (for example, starts a price watch).
+- run_code: runs a program or installs packages on this PC (the coding agent's runs and tests). The
+  program can do anything this user account can, so it's approved each time.
 - external_effect: does something outside this PC (sends, posts, books).
 - financial: involves money.
 
@@ -28,13 +32,15 @@ from vara.providers.base import ToolSpec
 
 class Risk(StrEnum):
     READ_ONLY = "read_only"
+    WORKSPACE_EDIT = "workspace_edit"
     LOCAL_CHANGE = "local_change"
+    RUN_CODE = "run_code"
     EXTERNAL_EFFECT = "external_effect"
     FINANCIAL = "financial"
 
     @property
     def needs_approval(self) -> bool:
-        return self is not Risk.READ_ONLY
+        return self not in (Risk.READ_ONLY, Risk.WORKSPACE_EDIT)
 
 
 class Params(BaseModel):
@@ -87,6 +93,10 @@ class Action:
     describe: Callable[[Any], str] = _describe_default
     timeout: float = 30.0
     needs: str | None = None  # an ActionContext field that must be set, e.g. "web"
+    # Run again every time it's asked, instead of reusing an earlier result with the same arguments.
+    # For actions whose result depends on what changed since (reading a file that was just edited,
+    # running the tests again after a fix).
+    repeatable: bool = False
 
     def available(self, ctx: ActionContext) -> bool:
         return self.needs is None or getattr(ctx, self.needs) is not None

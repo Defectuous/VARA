@@ -99,6 +99,9 @@ Settings come from `VARA_*` environment variables or a local `.env` file (never 
 | `VARA_AGENT_RUN_TIMEOUT_SECONDS` | `1200` | Time limit for a whole agent run, including waiting for approvals |
 | `VARA_AGENT_APPROVAL_TIMEOUT_SECONDS` | `600` | How long an approval request waits for your answer before it expires (and the action isn't done) |
 | `VARA_AGENT_MAX_RUNNING` | `3` | Agent runs that may be going at once |
+| `VARA_CODING_MAX_STEPS` | `40` | Model turns a Python coder request may take |
+| `VARA_CODING_RUN_TIMEOUT_SECONDS` | `3600` | Time limit for a whole Python coder request, including waiting for approvals |
+| `VARA_CODING_COMMAND_TIMEOUT_SECONDS` | `120` | Each program or test run the Python coder starts is stopped after this long (installs get at least 300) |
 
 Logs are JSON lines, with API keys, bearer tokens, and password/secret fields redacted.
 
@@ -493,6 +496,28 @@ for you, ✕ declined or failed). When an action needs your approval, a card app
 with exactly what it will do and its arguments: **Approve** or **Reject**, with an optional note. Cards
 appear for any run, including ones started from another window or by voice. **Pause agent** is the pause
 switch; **Stop** cancels the reply and its run.
+
+## Python coding agent
+
+Pick **Agent: Python coder** in the chat page's header (or send `"agent": "python"` to `/v1/chat`). It
+writes scripts and small tools, fixes and tests code, explains and reviews code, and analyses data with
+Python. It answers through the same agent loop as chat, local model first, then cloud as the privacy mode
+allows.
+
+It works only in V.A.R.A.'s projects folder, `data/projects/<name>`. It can't see or change anything else.
+Each project has a `pyproject.toml`, its own git history, and its own uv environment (Python 3.12+). To give
+it a data file or existing code, copy it into the project's folder.
+
+| What | Asks you first? |
+|---|---|
+| Listing, reading, and searching files; linting with ruff | No |
+| Creating projects, writing, editing, deleting, and formatting files, undoing the latest change | No. Every change is a git commit in that project, so `undo_last_change` (or git) takes it back |
+| Running a Python file (`run_python`), running the tests (`run_tests`, pytest), installing packages (`add_packages`, `uv add`) | Yes, every time |
+
+Programs run in the project folder with no keyboard input and a time limit. They don't get the server's
+API keys or tokens in their environment. **They aren't sandboxed otherwise:** an approved program can do
+anything your user account can, so read what it's about to run before you approve. Needs `uv` (and `git`
+for the history) on the PATH.
 
 ## Weather watch
 

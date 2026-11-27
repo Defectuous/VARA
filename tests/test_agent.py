@@ -504,5 +504,6 @@ def test_claude_gets_tool_results_grouped_in_one_user_turn() -> None:
 
 
 @pytest.mark.parametrize("risk", list(Risk))
-def test_only_read_only_actions_skip_approval(risk: Risk) -> None:
-    assert risk.needs_approval is (risk is not Risk.READ_ONLY)
+def test_only_reads_and_coding_project_edits_skip_approval(risk: Risk) -> None:
+    # Edits in the coding agent's own projects are git commits there, so they can be undone.
+    assert risk.needs_approval is (risk not in (Risk.READ_ONLY, Risk.WORKSPACE_EDIT))

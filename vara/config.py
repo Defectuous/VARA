@@ -128,6 +128,13 @@ class Settings(BaseSettings):
     agent_approval_timeout_seconds: float = 600.0
     agent_max_running: int = 3
 
+    # The Python coding agent (vara/coding/): projects live in data/projects. It may take more steps and
+    # time than a chat run; each program, test run, or install it starts is stopped after
+    # coding_command_timeout_seconds.
+    coding_max_steps: int = 40
+    coding_run_timeout_seconds: float = 3600.0
+    coding_command_timeout_seconds: float = 120.0
+
     # Weather watch (vara/weather/): warns a day or three before the shifts that tend to set off the
     # owner's sinus trouble (cold fronts, pressure swings, big temperature and dew-point drops, rain).
     # Off until a location is set. Only the latitude and longitude leave this PC (to Open-Meteo).
@@ -184,6 +191,10 @@ class Settings(BaseSettings):
     def documents_dir(self) -> Path:
         """Word and PDF documents V.A.R.A. has made (vara/documents.py)."""
         return self.data_dir / "documents"
+
+    @property
+    def projects_dir(self) -> Path:
+        return self.data_dir / "projects"
 
     @property
     def evals_dir(self) -> Path:

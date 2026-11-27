@@ -34,7 +34,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
 from vara import store
-from vara.actions.base import ActionContext, ActionFailed, ActionRegistry
+from vara.actions.base import ActionContext, ActionFailed, ActionRegistry, Risk
 from vara.api import ROUTING_ERRORS, fill_clock
 from vara.db.models import (
     ActionRecord,
@@ -108,6 +108,8 @@ class RunOptions:
     tools: set[str] | None = None
     save: bool = True
     sink: asyncio.Queue | None = None
+    # Time limit for this run (None: agent_run_timeout_seconds). The coding agent takes longer.
+    timeout: float | None = None
 
 
 class Approvals:
@@ -358,7 +360,7 @@ class AgentManager:
             names = {a.name for a in allowed}
             tools = [a.spec() for a in allowed]
             messages, system = self._start(options)
-            async with asyncio.timeout(self.settings.agent_run_timeout_seconds):
+            async with asyncio.timeout(options.timeout or self.settings.agent_run_timeout_seconds):
                 for step in range(1, max_steps + 1):
                     self._update_run(run_id, steps=step)
                     text, calls = await self._turn(
@@ -393,7 +395,7 @@ class AgentManager:
                     error=f"Reached the limit of {max_steps} steps",
                 )
         except TimeoutError:
-            limit = self.settings.agent_run_timeout_seconds
+            limit = options.timeout or self.settings.agent_run_timeout_seconds
             self._finish(
                 run_id, RunStatus.STOPPED, options, totals, error=f"Ran out of time ({limit:g} s)"
             )
@@ -514,7 +516,11 @@ class AgentManager:
                 )
             self._update_record(record_id, description=action.describe(params))
 
-            if (previous := self._previous_result(run_id, fingerprint, action.risk)) is not None:
+            if (
+                not action.repeatable
+                and (previous := self._previous_result(run_id, fingerprint, action.risk))
+                is not None
+            ):
                 return self._close(
                     record_id,
                     ActionStatus.DUPLICATE,
@@ -550,7 +556,8 @@ class AgentManager:
                     record_id, decided_at=utcnow(), decision_note=note, permission="approved"
                 )
             else:
-                self._update_record(record_id, permission="read-only")
+                permission = "workspace" if action.risk is Risk.WORKSPACE_EDIT else "read-only"
+                self._update_record(record_id, permission=permission)
 
             self._update_record(record_id, status=ActionStatus.RUNNING, started_at=utcnow())
             self._publish("agent_action", self._record_data(record_id))

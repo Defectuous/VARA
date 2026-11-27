@@ -71,6 +71,9 @@ class ChatRequest(BaseModel):
     # Answer through the agent loop with tools (search, quotes, prices, memory; anything that changes
     # something waits for approval). Unset uses VARA_CHAT_TOOLS.
     tools: bool | None = None
+    # Which agent answers: "chat" (V.A.R.A. herself) or "python", the Python coding agent (vara/coding/),
+    # which writes, runs, and tests code in V.A.R.A.'s projects folder. "python" always uses tools.
+    agent: Literal["chat", "python"] = "chat"
     # An id the sending client picks for itself. Live events (/v1/events) carry it, so a chat page can
     # skip the exchanges it sent itself and show everyone else's (the voice listener's, other tabs').
     client: str | None = Field(default=None, max_length=64)
@@ -405,11 +408,20 @@ ONLINE_TOOLS = {"web_search", "market_quotes", "find_prices"}
 def _uses_tools(request: Request, body: ChatRequest) -> bool:
     if getattr(request.app.state, "agent", None) is None:
         return False
+    if body.agent == "python":
+        return True
     return body.tools if body.tools is not None else request.app.state.settings.chat_tools
 
 
 def _chat_tools(request: Request, body: ChatRequest) -> set[str]:
+    from vara.coding.actions import CODING_HELPERS, CODING_TOOLS
+
     names = {a.name for a in request.app.state.agent.registry.all()}
+    # Chat doesn't get the coding tools; the coding agent gets only its own and a few helpers.
+    if body.agent == "python":
+        names &= CODING_TOOLS | CODING_HELPERS
+    else:
+        names -= CODING_TOOLS
     if not body.web_search:
         names -= ONLINE_TOOLS
     if not body.use_memory:
@@ -470,7 +482,14 @@ async def _open_agent_stream(
     body = prepared.body
     tools = _chat_tools(request, body)
     original_system = system = prepared.system
-    if tools & ONLINE_TOOLS and request.app.state.web is not None:
+    settings = request.app.state.settings
+    coding = body.agent == "python"
+    if coding:
+        from vara.coding.actions import coding_instructions
+
+        instructions = coding_instructions(settings)
+        system = f"{system}\n\n{instructions}" if system else instructions
+    elif tools & ONLINE_TOOLS and request.app.state.web is not None:
         system = f"{system}\n\n{TOOLS_ABILITY}" if system else TOOLS_ABILITY
     sink: asyncio.Queue = asyncio.Queue()
     options = RunOptions(
@@ -488,6 +507,8 @@ async def _open_agent_stream(
         tools=tools,
         save=False,  # the exchange is saved by _persist, like any chat reply
         sink=sink,
+        max_steps=settings.coding_max_steps if coding else None,
+        timeout=settings.coding_run_timeout_seconds if coding else None,
     )
     try:
         run_id = manager.start(options)
