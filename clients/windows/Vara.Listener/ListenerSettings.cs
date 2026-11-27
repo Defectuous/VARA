@@ -41,6 +41,12 @@ public sealed record ListenerSettings
     /// <summary>Longest spoken request.</summary>
     public double MaxRequestSeconds { get; init; } = 30;
 
+    /// <summary>
+    /// When a reply ends with a question, how long V.A.R.A. listens for your answer without the wake word.
+    /// If you don't start talking in that time, she goes back to waiting for "VARA". 0 turns it off.
+    /// </summary>
+    public double AnswerWindowSeconds { get; init; } = 30;
+
     /// <summary>Start a new conversation after this long without speaking to V.A.R.A.</summary>
     public double ConversationIdleMinutes { get; init; } = 10;
 

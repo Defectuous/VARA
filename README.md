@@ -195,9 +195,16 @@ the conversation.
    sentence by sentence as it streams. Say "VARA" to interrupt.
 
 Say only "VARA" (or pause after it) and it answers "Yes?" and listens once more without needing the name.
-After the wake word it waits up to 2.5 s for you to start talking (4 s after "Yes?"), then stops at 0.9 s of
-silence. Requests within
-10 minutes of each other continue the same conversation, so they show up together in the chat page.
+**When V.A.R.A. asks you something** (her reply ends with a question), she listens for your answer the same
+way: just answer, no "VARA" needed. You'll hear the listening chime. If you don't start talking within 30
+seconds (`AnswerWindowSeconds`), she goes back to waiting for "VARA", and nothing is sent anywhere. Saying
+"VARA, ..." in that window works too. Answers can chain: if her next reply is another question, she listens
+again. A TV or another person talking in that window can be taken as your answer; shorten the window if that
+happens.
+
+After the wake word it waits up to 2.5 s for you to start talking (6 s after "Yes?"); an answer ends at your
+first pause. Requests within 10 minutes of each other continue the same conversation, so they show up
+together in the chat page.
 
 Build it (needs the .NET 10 SDK and the trained `models/vara.onnx`):
 
@@ -216,7 +223,8 @@ apps to use the microphone (Settings > Privacy & security > Microphone). Setting
 | `MicrophoneDevice` | `-1` | Windows recording device number; `-1` is the default microphone |
 | `Voice` | `bf_lily` | A Kokoro voice from the backend (see Speaking) |
 | `FallbackVoice` | `Microsoft Zira Desktop` | Windows voice used if the backend can't speak |
-| `EndSilenceSeconds` | `0.9` | Silence that ends a request |
+| `EndSilenceSeconds` | `1.8` | Silence that ends a request |
+| `AnswerWindowSeconds` | `30` | How long she listens for an answer after asking a question; `0` turns it off |
 | `ConversationIdleMinutes` | `10` | After this long, the next request starts a new conversation |
 
 The log (`%LOCALAPPDATA%\VARA\logs\listener.log`, or **Open log** in the tray menu) records events only:

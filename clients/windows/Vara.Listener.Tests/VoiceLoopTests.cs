@@ -23,12 +23,20 @@ public class VoiceLoopTests
         public List<(string Text, int? Conversation)> Asked { get; } = new();
         public Exception? Fail { get; set; }
 
+        /// <summary>Returned by the next transcription instead of the fixed one (then cleared).</summary>
+        public Transcript? NextTranscript { get; set; }
+
         public Task<Transcript> TranscribeAsync(ReadOnlyMemory<short> samples, CancellationToken ct = default)
         {
             TranscribedSampleCounts.Add(samples.Length);
             if (Fail is not null)
             {
                 throw Fail;
+            }
+            if (NextTranscript is { } next)
+            {
+                NextTranscript = null;
+                return Task.FromResult(next);
             }
             return Task.FromResult(new Transcript(transcript, wakeWord, request));
         }
@@ -75,12 +83,12 @@ public class VoiceLoopTests
 
     private static readonly ListenerSettings Settings = new() { PreRollSeconds = 0.4, EndSilenceSeconds = 0.4, MaxRequestSeconds = 5 };
 
-    private static (VoiceLoop Loop, FakeWake Wake, FakeVoice Voice, FakeChimes Chimes) Make(FakeBackend backend)
+    private static (VoiceLoop Loop, FakeWake Wake, FakeVoice Voice, FakeChimes Chimes) Make(FakeBackend backend, ListenerSettings? settings = null)
     {
         var wake = new FakeWake();
         var voice = new FakeVoice();
         var chimes = new FakeChimes();
-        return (new VoiceLoop(Settings, wake, backend, voice, chimes), wake, voice, chimes);
+        return (new VoiceLoop(settings ?? Settings, wake, backend, voice, chimes), wake, voice, chimes);
     }
 
     /// <summary>Background audio, "VARA" detected, a spoken request, then silence until the request ends.</summary>
@@ -117,8 +125,9 @@ public class VoiceLoopTests
         Assert.Equal((5 + 31) * Chunk, Assert.Single(backend.TranscribedSampleCounts));
         Assert.Equal(("what time is it?", (int?)null), Assert.Single(backend.Asked));
         Assert.Equal(new[] { "It is ten past four.", "Anything else?" }, voice.Said);
-        Assert.Equal(new[] { "listening", "thinking" }, chimes.Played);
-        Assert.Equal(ListenerState.Listening, loop.State);
+        // "Anything else?" is a question, so V.A.R.A. listens for the answer (another chime).
+        Assert.Equal(new[] { "listening", "thinking", "listening" }, chimes.Played);
+        Assert.Equal(ListenerState.Capturing, loop.State);
         Assert.True(wake.Resets >= 1); // so the same "VARA" can't trigger again
     }
 
@@ -326,5 +335,112 @@ public class VoiceLoopTests
         await loop.CurrentReply;
 
         Assert.Contains($"Heads up. {Alert}", voice.Said);
+    }
+
+    /// <summary>Feed chunks while the loop is capturing (an answer window), at most <paramref name="max"/>.</summary>
+    private static int FeedWhileCapturing(VoiceLoop loop, short[] chunk, int max)
+    {
+        var fed = 0;
+        while (fed < max && loop.State == ListenerState.Capturing)
+        {
+            loop.Process(chunk);
+            fed++;
+        }
+        return fed;
+    }
+
+    private static readonly ListenerSettings ShortWindow = Settings with { AnswerWindowSeconds = 2 };
+
+    [Fact]
+    public async Task After_a_question_the_answer_needs_no_wake_word()
+    {
+        var backend = new FakeBackend("VARA, set a timer", true, "set a timer", "For how long?");
+        var (loop, wake, _, _) = Make(backend, ShortWindow);
+
+        await SayVaraAndRequest(loop, wake);
+        Assert.Equal(ListenerState.Capturing, loop.State);
+
+        backend.NextTranscript = new Transcript("Ten minutes.", false, "Ten minutes.");
+        for (var i = 0; i < 3; i++)
+        {
+            loop.Process(Silence); // a moment before answering
+        }
+        for (var i = 0; i < 8; i++)
+        {
+            loop.Process(Speech);
+        }
+        var silence = FeedWhileCapturing(loop, Silence, 100);
+        await loop.CurrentReply;
+
+        Assert.Equal(5, silence); // ended at the first pause (0.4 s), not at the end of the window
+        Assert.Equal(new (string, int?)[] { ("set a timer", null), ("Ten minutes.", 42) }, backend.Asked);
+        // Only the answer (with a short lead-in) was transcribed, not the wait before it.
+        Assert.Equal((3 + 8 + 5) * Chunk, backend.TranscribedSampleCounts[^1]);
+    }
+
+    [Fact]
+    public async Task No_answer_in_the_window_goes_back_to_waiting_for_vara()
+    {
+        var backend = new FakeBackend("VARA, set a timer", true, "set a timer", "For how long?");
+        var (loop, wake, _, _) = Make(backend, ShortWindow);
+
+        await SayVaraAndRequest(loop, wake);
+        var fed = FeedWhileCapturing(loop, Silence, 100);
+
+        Assert.Equal(25, fed); // 2 s of 80 ms chunks
+        Assert.Equal(ListenerState.Listening, loop.State);
+        Assert.Single(backend.TranscribedSampleCounts); // the silence wasn't sent to be transcribed
+    }
+
+    [Fact]
+    public async Task A_statement_goes_straight_back_to_waiting_for_vara()
+    {
+        var backend = new FakeBackend("VARA, thanks", true, "thanks", "You're welcome.");
+        var (loop, wake, _, _) = Make(backend, ShortWindow);
+
+        await SayVaraAndRequest(loop, wake);
+
+        Assert.Equal(ListenerState.Listening, loop.State);
+    }
+
+    [Fact]
+    public async Task The_answer_window_can_be_turned_off()
+    {
+        var backend = new FakeBackend("VARA, set a timer", true, "set a timer", "For how long?");
+        var (loop, wake, _, _) = Make(backend, Settings with { AnswerWindowSeconds = 0 });
+
+        await SayVaraAndRequest(loop, wake);
+
+        Assert.Equal(ListenerState.Listening, loop.State);
+    }
+
+    [Fact]
+    public async Task Saying_vara_in_an_answer_window_does_not_send_the_name()
+    {
+        var backend = new FakeBackend("VARA, set a timer", true, "set a timer", "For how long?");
+        var (loop, wake, _, _) = Make(backend, ShortWindow);
+
+        await SayVaraAndRequest(loop, wake);
+        backend.NextTranscript = new Transcript("VARA, never mind.", true, "never mind.");
+        for (var i = 0; i < 8; i++)
+        {
+            loop.Process(Speech);
+        }
+        FeedWhileCapturing(loop, Silence, 100);
+        await loop.CurrentReply;
+
+        Assert.Equal("never mind.", backend.Asked[^1].Text);
+    }
+
+    [Theory]
+    [InlineData("For how long?", true)]
+    [InlineData("Want the details? ", true)]
+    [InlineData("Should I \"start it?\"", true)]
+    [InlineData("Done. Is that right?)", true)]
+    [InlineData("It's ten past four.", false)]
+    [InlineData("Why? Because it rained.", false)]
+    public void Questions_are_recognised_by_how_the_reply_ends(string reply, bool expected)
+    {
+        Assert.Equal(expected, VoiceLoop.EndsWithQuestion(reply));
     }
 }

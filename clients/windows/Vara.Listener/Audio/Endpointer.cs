@@ -7,6 +7,10 @@ namespace Vara.Listener.Audio;
 /// level, or at <c>maxSeconds</c>. The first <c>ignoreSeconds</c> are skipped: they hold the tail of the
 /// wake word, which the detector fires on before you have finished saying it. The speech level is set a margin above the
 /// room's background noise, which <see cref="NoiseFloor"/> tracks while V.A.R.A. is waiting for its name.
+///
+/// <see cref="ForAnswer"/> is for answers (after V.A.R.A. asks a question): it waits up to a window for you
+/// to start talking and gives up if you don't; once you do, it ends at the first <c>endSilence</c> pause,
+/// with no minimum wait, and <c>maxSeconds</c> counts from when you started.
 /// </summary>
 public sealed class Endpointer
 {
@@ -19,8 +23,12 @@ public sealed class Endpointer
     private readonly int _endSilenceChunks;
     private readonly int _maxChunks;
     private readonly int _ignoreChunks;
+    private readonly int? _answerWindowChunks;
     private int _chunks;
     private int _lastSpeechChunk;
+
+    /// <summary>The chunk (1-based) where speech started; 0 until then.</summary>
+    public int FirstSpeechChunk { get; private set; }
 
     public bool HeardSpeechAfterWake { get; private set; }
 
@@ -41,6 +49,16 @@ public sealed class Endpointer
         _ignoreChunks = ignoreSeconds > 0 ? ToChunks(ignoreSeconds) : 0;
     }
 
+    /// <summary>For an answer: wait up to <paramref name="windowSeconds"/> for speech to start.</summary>
+    public static Endpointer ForAnswer(double noiseFloorDb, double endSilenceSeconds, double maxSeconds, double windowSeconds) =>
+        new(noiseFloorDb, endSilenceSeconds, maxSeconds, answerWindowSeconds: windowSeconds);
+
+    private Endpointer(double noiseFloorDb, double endSilenceSeconds, double maxSeconds, double answerWindowSeconds)
+        : this(noiseFloorDb, endSilenceSeconds, maxSeconds, startTimeoutSeconds: 0.08)
+    {
+        _answerWindowChunks = ToChunks(answerWindowSeconds);
+    }
+
     private static int ToChunks(double seconds) => Math.Max(1, (int)Math.Round(seconds / ChunkSeconds));
 
     /// <summary>Feed the next 80 ms chunk; returns true when the request is over.</summary>
@@ -52,7 +70,19 @@ public sealed class Endpointer
         if (_chunks > _ignoreChunks && level >= _thresholdDb)
         {
             _lastSpeechChunk = _chunks;
+            if (!HeardSpeechAfterWake)
+            {
+                FirstSpeechChunk = _chunks;
+            }
             HeardSpeechAfterWake = true;
+        }
+        if (_answerWindowChunks is { } window)
+        {
+            if (!HeardSpeechAfterWake)
+            {
+                return _chunks >= window; // nobody answered
+            }
+            return _chunks - FirstSpeechChunk + 1 >= _maxChunks || _chunks - _lastSpeechChunk >= _endSilenceChunks;
         }
         if (_chunks >= _maxChunks)
         {

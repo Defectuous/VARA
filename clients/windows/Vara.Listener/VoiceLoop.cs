@@ -51,6 +51,9 @@ public interface IChimes
 ///                false wake-up and is dropped; otherwise the request goes to chat.
 ///   Speaking   - the reply is spoken sentence by sentence as it streams. Saying "VARA" interrupts it.
 /// Saying only "VARA" gets a "Yes?" and one follow-up capture that doesn't need the wake word.
+/// When a reply ends with a question, V.A.R.A. listens for your answer the same way, for up to
+/// <see cref="ListenerSettings.AnswerWindowSeconds"/>; if you don't start talking, she goes back to waiting
+/// for "VARA" (and nothing is sent to be transcribed). Saying "VARA, ..." in that window works too.
 ///
 /// Announcements (a weather alert from the backend) are spoken only while you're active: talking to
 /// V.A.R.A. now, within <see cref="ListenerSettings.ConversationIdleMinutes"/> of the last exchange, or
@@ -204,7 +207,7 @@ public sealed class VoiceLoop
                     if (turn == _turn && !_paused)
                     {
                         _lastExchange = DateTimeOffset.Now; // an answer continues this conversation
-                        BeginCapture(followUp: true);
+                        BeginCapture(followUp: true, _settings.AnswerWindowSeconds > 0 ? _settings.AnswerWindowSeconds : YesWindowSeconds);
                     }
                 }
             }
@@ -273,21 +276,55 @@ public sealed class VoiceLoop
         }
     }
 
-    private void BeginCapture(bool followUp)
+    /// <summary>How long a follow-up waits for you to start after "Yes?".</summary>
+    internal const double YesWindowSeconds = 6.0;
+
+    /// <summary>Audio kept from before an answer starts, so its first syllable isn't clipped.</summary>
+    private const int AnswerLeadChunks = 4;
+
+    /// <summary>
+    /// Start recording a request. A follow-up (after "Yes?", a question, or an announcement) needs no wake
+    /// word: it waits up to <paramref name="windowSeconds"/> for you to start, then ends at your first pause.
+    /// </summary>
+    private void BeginCapture(bool followUp, double windowSeconds = YesWindowSeconds)
     {
         _chimes.Listening();
         _turn++;
         _followUp = followUp;
-        // The pre-roll holds "VARA" itself; a follow-up starts fresh, after the "Yes?".
+        // The pre-roll holds "VARA" itself; a follow-up starts fresh, after V.A.R.A. stops talking.
         _capture = followUp ? new List<short[]>() : new List<short[]>(_preRoll);
-        // After "Yes?" people take a moment to answer, so a follow-up waits longer for them to start.
-        _endpointer = new Endpointer(_noise.Db, _settings.EndSilenceSeconds, _settings.MaxRequestSeconds,
-            startTimeoutSeconds: followUp ? 4.0 : 2.5, ignoreSeconds: followUp ? 0 : 0.4);
+        _endpointer = followUp
+            ? Endpointer.ForAnswer(_noise.Db, _settings.EndSilenceSeconds, _settings.MaxRequestSeconds, windowSeconds)
+            : new Endpointer(_noise.Db, _settings.EndSilenceSeconds, _settings.MaxRequestSeconds,
+                startTimeoutSeconds: 2.5, ignoreSeconds: 0.4);
         SetState(ListenerState.Capturing);
+    }
+
+    /// <summary>Whether a reply ends by asking you something (its last sentence ends with "?").</summary>
+    internal static bool EndsWithQuestion(string reply)
+    {
+        // Closing quotes, brackets, and Markdown emphasis can follow the question mark.
+        var end = reply.TrimEnd().TrimEnd('"', '\'', '”', '’', ')', '*', '_', ' ');
+        return end.EndsWith('?');
     }
 
     private void EndCapture()
     {
+        if (_followUp && !_endpointer!.HeardSpeechAfterWake)
+        {
+            // Nobody answered: nothing to transcribe.
+            Log.Info("No answer heard; listening for VARA again");
+            _wake.Reset();
+            SetState(ListenerState.Listening);
+            StartAnnouncementLocked();
+            return;
+        }
+        if (_followUp)
+        {
+            // Drop the wait before you started talking, keeping a moment of lead-in.
+            var start = Math.Max(0, _endpointer!.FirstSpeechChunk - 1 - AnswerLeadChunks);
+            _capture = _capture.Skip(start).ToList();
+        }
         Log.Info($"Capture ended: {_capture.Count * Endpointer.ChunkSeconds:0.0} s" +
                  (_endpointer!.HeardSpeechAfterWake ? "" : " (no speech after the wake word)") +
                  (_followUp ? ", follow-up" : "") +
@@ -310,7 +347,8 @@ public sealed class VoiceLoop
             string request;
             if (followUp)
             {
-                request = transcript.Text.Trim();
+                // No wake word needed, but "VARA, ..." in an answer window shouldn't send "VARA" along.
+                request = (transcript.WakeWord ? transcript.Request : transcript.Text).Trim();
             }
             else if (!transcript.WakeWord)
             {
@@ -328,7 +366,7 @@ public sealed class VoiceLoop
             {
                 if (followUp)
                 {
-                    Log.Info("Nothing heard after \"Yes?\"; listening for VARA again");
+                    Log.Info("Nothing understood in the answer; listening for VARA again");
                     ReturnToListening(turn);
                     return;
                 }
@@ -353,8 +391,10 @@ public sealed class VoiceLoop
             }
             StartSpeaking(turn);
             var splitter = new SentenceSplitter();
+            var reply = new System.Text.StringBuilder();
             void Speak(string text)
             {
+                reply.Append(text);
                 foreach (var sentence in splitter.Add(text))
                 {
                     _voice.Say(sentence);
@@ -380,6 +420,18 @@ public sealed class VoiceLoop
             _lastExchange = DateTimeOffset.Now;
             Log.Info($"Answered by {result.Provider} {result.Model} (conversation {result.ConversationId})");
             await _voice.WaitUntilIdleAsync(ct);
+            if (_settings.AnswerWindowSeconds > 0 && EndsWithQuestion(reply.ToString()))
+            {
+                lock (_gate)
+                {
+                    if (turn == _turn && !_paused)
+                    {
+                        Log.Info($"V.A.R.A. asked a question; listening {_settings.AnswerWindowSeconds:0} s for the answer");
+                        BeginCapture(followUp: true, _settings.AnswerWindowSeconds);
+                    }
+                }
+                return;
+            }
             ReturnToListening(turn);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
