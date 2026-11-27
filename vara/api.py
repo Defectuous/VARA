@@ -10,10 +10,11 @@ from typing import Literal
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import select
 
 from vara import price_watch, store
 from vara.db.database import Database
-from vara.db.models import Conversation, utcnow
+from vara.db.models import ActionRecord, Conversation, utcnow
 from vara.deals import deal_context
 from vara.deals import parse_request as parse_deal_request
 from vara.documents import DocFormat, document_instructions, requested_format
@@ -66,6 +67,9 @@ class ChatRequest(BaseModel):
     # Whether the model reasons before answering: "auto" decides per message (fast for small talk,
     # reasoning for hard questions), "on"/"off" force it. Unset uses VARA_REASONING.
     reasoning: ReasoningMode | None = None
+    # Answer through the agent loop with tools (search, quotes, prices, memory; anything that changes
+    # something waits for approval). Unset uses VARA_CHAT_TOOLS.
+    tools: bool | None = None
     # An id the sending client picks for itself. Live events (/v1/events) carry it, so a chat page can
     # skip the exchanges it sent itself and show everyone else's (the voice listener's, other tabs').
     client: str | None = Field(default=None, max_length=64)
@@ -113,6 +117,9 @@ class ChatResponse(BaseModel):
     price_alerts: list[dict] | None = None
     reasoning: bool | None = None
     document: dict | None = None
+    # When the reply came through the agent loop: its run, and each tool it asked for.
+    agent_run_id: int | None = None
+    actions: list[dict] | None = None
 
 
 def _router(request: Request) -> ModelRouter:
@@ -150,6 +157,8 @@ class _Prepared:
     price_alerts: list[dict] | None = None
     document_format: DocFormat | None = None  # the reply is saved as this kind of file
     document: dict | None = None
+    agent_run_id: int | None = None
+    actions: list[dict] | None = None
 
 
 SPOKEN_REPLY = (
@@ -239,18 +248,23 @@ def _append_system(prepared: _Prepared, block: str) -> None:
     prepared.system = f"{prepared.system}\n\n{block}" if prepared.system else block
 
 
-async def _add_deals(request: Request, prepared: _Prepared, text: str, retrieved: str) -> bool:
-    """Price alerts waiting to be told, and price checks or watches the message asks for. Returns True
-    when the message was a buying request (so no general web search is needed)."""
-    finder = getattr(request.app.state, "deals", None)
-    if finder is None:
-        return False
+def _add_price_alerts(request: Request, prepared: _Prepared) -> None:
+    """Price-watch alerts the user hasn't been told about yet; they are told once."""
     with _db(request).session() as session:
         if alerts := price_watch.unseen_alerts(session):
             _append_system(prepared, price_watch.alerts_context(alerts))
             prepared.price_alerts = [price_watch.alert_dict(a) for a in alerts]
             for alert in alerts:
                 alert.seen_at = utcnow()
+
+
+async def _add_deals(request: Request, prepared: _Prepared, text: str, retrieved: str) -> bool:
+    """Price alerts waiting to be told, and price checks or watches the message asks for. Returns True
+    when the message was a buying request (so no general web search is needed)."""
+    finder = getattr(request.app.state, "deals", None)
+    if finder is None:
+        return False
+    _add_price_alerts(request, prepared)
     deal = parse_deal_request(text)
     if deal is None:
         return False
@@ -370,6 +384,190 @@ async def _add_web_search(request: Request, prepared: _Prepared) -> None:
     )
 
 
+TOOLS_ABILITY = (
+    "You can get current public information with your tools: web_search for news and facts that change "
+    "(who holds an office, results, events, weather), market_quotes for stock, index, and cryptocurrency "
+    "prices, and find_prices for what a product costs in stores. Your training data is older than today, "
+    "so when an answer depends on anything that may have changed (who holds an office, news, prices, "
+    "results), call the tool first; timeless facts, math, and writing need no tool. Never say you can't "
+    "access the internet, live data, or public data, and never give a current price or figure that didn't "
+    "come from a tool result. If search results don't answer the question, search once more with different "
+    "words (fewer, or more specific) before saying you didn't find it this time."
+)
+# Tools that reach outside this PC (only the search words or product names leave it). A request with
+# web_search turned off doesn't get them.
+ONLINE_TOOLS = {"web_search", "market_quotes", "find_prices"}
+
+
+def _uses_tools(request: Request, body: ChatRequest) -> bool:
+    if getattr(request.app.state, "agent", None) is None:
+        return False
+    return body.tools if body.tools is not None else request.app.state.settings.chat_tools
+
+
+def _chat_tools(request: Request, body: ChatRequest) -> set[str]:
+    names = {a.name for a in request.app.state.agent.registry.all()}
+    if not body.web_search:
+        names -= ONLINE_TOOLS
+    if not body.use_memory:
+        names.discard("search_memory")
+    return names
+
+
+def _note_result(prepared: _Prepared, action: str, data: dict) -> None:
+    """Fill the reply's web_search, market_data, and deals fields from what the tools found, the same
+    fields the fixed search steps fill."""
+    if action == "web_search":
+        found = prepared.web_search or {"query": None, "results": [], "unresponsive_engines": []}
+        found["query"] = (
+            data.get("query")
+            if found["query"] is None
+            else f"{found['query']}; {data.get('query')}"
+        )
+        found["results"] = [*found["results"], *data.get("results", [])]
+        found["unresponsive_engines"] = sorted(
+            {*found["unresponsive_engines"], *data.get("unresponsive_engines", [])}
+        )
+        prepared.web_search = found
+    elif action == "market_quotes":
+        prepared.market_data = [*(prepared.market_data or []), *data.get("quotes", [])]
+    elif action == "find_prices":
+        prepared.deals = {k: data[k] for k in ("query", "offers", "checked", "failed") if k in data}
+
+
+def _actions_used(request: Request, run_id: int) -> list[dict]:
+
+    with _db(request).session() as session:
+        records = session.scalars(
+            select(ActionRecord).where(ActionRecord.run_id == run_id).order_by(ActionRecord.id)
+        )
+        return [
+            {
+                "id": r.id,
+                "action": r.action,
+                "description": r.description,
+                "status": r.status,
+                "risk": r.risk,
+            }
+            for r in records
+        ]
+
+
+async def _open_agent_stream(
+    request: Request, prepared: _Prepared
+) -> AsyncIterator[RoutedEvent] | None:
+    """Answer through the agent loop: the model calls tools itself, each call is checked, approved when it
+    changes something, and recorded. Streams like `_open_stream`: every step's text, then one Completed
+    with the whole run's usage. None when no run can start (paused, or too many going); the caller then
+    answers without tools."""
+    # Imported here: vara.agent imports this module.
+    from vara.agent import AgentPaused, RunOptions, TooManyRuns
+
+    manager = request.app.state.agent
+    body = prepared.body
+    tools = _chat_tools(request, body)
+    original_system = system = prepared.system
+    if tools & ONLINE_TOOLS and request.app.state.web is not None:
+        system = f"{system}\n\n{TOOLS_ABILITY}" if system else TOOLS_ABILITY
+    sink: asyncio.Queue = asyncio.Queue()
+    options = RunOptions(
+        goal=prepared.new_messages[-1].content,
+        conversation_id=body.conversation_id,
+        provider=body.provider,
+        model=body.model,
+        confirm_cloud=body.confirm_cloud,
+        client=body.client,
+        client_time=body.client_time,
+        client_timezone=body.client_timezone,
+        think=prepared.think,
+        system=system,
+        messages=prepared.messages,
+        tools=tools,
+        save=False,  # the exchange is saved by _persist, like any chat reply
+        sink=sink,
+    )
+    try:
+        run_id = manager.start(options)
+    except (AgentPaused, TooManyRuns) as exc:
+        logging.getLogger("vara").info("Answering without tools: %s", exc)
+        return None
+    prepared.system = system
+    prepared.agent_run_id = run_id
+
+    async def events() -> AsyncIterator[RoutedEvent]:
+        ended = False
+        last: Completed | None = None
+        try:
+            while True:
+                item = await sink.get()
+                if item[0] == "event":
+                    routed = item[1]
+                    if isinstance(routed.event, TextDelta):
+                        yield routed
+                    elif isinstance(routed.event, Completed):
+                        last = routed.event
+                elif item[0] == "result":
+                    _note_result(prepared, item[1], item[2])
+                elif item[0] == "error":
+                    raise item[1]
+                elif item[0] == "end":
+                    ended = True
+                    run, totals = item[1], item[2]
+                    prepared.actions = _actions_used(request, run_id)
+                    if not run["final_text"] or totals["provider"] is None:
+                        raise ProviderError(run["error"] or "The model ended without answering")
+                    yield RoutedEvent(
+                        totals["provider"],
+                        Completed(
+                            model=totals["model"],
+                            stop_reason=last.stop_reason if last else None,
+                            input_tokens=totals["input"],
+                            output_tokens=totals["output"],
+                        ),
+                        cost_usd=totals["cost"],
+                    )
+                    return
+        finally:
+            if not ended:  # nobody is waiting for the answer any more
+                manager.cancel(run_id, "Stopped before the reply finished")
+
+    stream = events()
+    try:
+        first = await anext(stream)
+    except ROUTING_ERRORS as exc:
+        if _cannot_use_tools(exc):
+            # The chosen model can't call tools (Ollama only says so when asked): answer without them.
+            logging.getLogger("vara").info("Answering without tools: the model can't use them")
+            prepared.system, prepared.agent_run_id, prepared.actions = original_system, None, None
+            prepared.web_search = prepared.market_data = prepared.deals = None
+            return None
+        raise http_error(exc) from exc
+
+    async def chained() -> AsyncIterator[RoutedEvent]:
+        yield first
+        async for routed in stream:
+            yield routed
+
+    return chained()
+
+
+def _cannot_use_tools(exc: Exception) -> bool:
+    """The model or provider can't take tools: the router has no tool-capable provider to offer, or
+    Ollama refused the request because the model doesn't support tools."""
+    reasons = [str(exc), *getattr(exc, "errors", {}).values()]
+    return any("can't use tools" in r or "does not support tools" in r for r in reasons)
+
+
+async def _open_answer(request: Request, prepared: _Prepared) -> AsyncIterator[RoutedEvent]:
+    """Everything before the reply streams: tools through the agent loop, or the fixed search steps."""
+    if _uses_tools(request, prepared.body):
+        _add_price_alerts(request, prepared)
+        if (events := await _open_agent_stream(request, prepared)) is not None:
+            return events
+    await _add_web_search(request, prepared)
+    return await _open_stream(request, prepared)
+
+
 def _persist(request: Request, prepared: _Prepared, reply: str, summary: dict) -> dict:
     with _db(request).session() as session:
         if prepared.body.conversation_id is None:
@@ -389,18 +587,25 @@ def _persist(request: Request, prepared: _Prepared, reply: str, summary: dict) -
                 prepared.document = saved.to_dict()
                 store.attach_document(stored, saved.name)
                 logging.getLogger("vara").info("Document made from reply: %s", saved.name)
-        return {
+        saved_ids = {
             "conversation_id": conversation.id,
             "message_id": stored.id,
-            **summary,
-            "memories_used": prepared.memories_used,
-            "web_search": prepared.web_search,
-            "market_data": prepared.market_data,
-            "deals": prepared.deals,
-            "price_alerts": prepared.price_alerts,
-            "reasoning": prepared.think,
-            "document": prepared.document,
         }
+    if prepared.agent_run_id is not None:
+        request.app.state.agent.link(prepared.agent_run_id, saved_ids["conversation_id"])
+    return {
+        **saved_ids,
+        **summary,
+        "memories_used": prepared.memories_used,
+        "web_search": prepared.web_search,
+        "market_data": prepared.market_data,
+        "deals": prepared.deals,
+        "price_alerts": prepared.price_alerts,
+        "reasoning": prepared.think,
+        "document": prepared.document,
+        "agent_run_id": prepared.agent_run_id,
+        "actions": prepared.actions,
+    }
 
 
 async def _open_stream(request: Request, prepared: _Prepared) -> AsyncIterator[RoutedEvent]:
@@ -523,11 +728,10 @@ class _Announcer:
 async def chat(body: ChatRequest, request: Request) -> ChatResponse:
     prepared = _prepare(request, body)
     live = _Announcer(request, body)
-    await _add_web_search(request, prepared)
     parts: list[str] = []
     summary: dict | None = None
     try:
-        async for routed in await _open_stream(request, prepared):
+        async for routed in await _open_answer(request, prepared):
             if isinstance(routed.event, TextDelta):
                 parts.append(routed.event.text)
                 live.delta(routed.event.text, routed.provider)
@@ -569,8 +773,7 @@ async def chat_stream(body: ChatRequest, request: Request) -> StreamingResponse:
     settings = request.app.state.settings
 
     async def begin() -> AsyncIterator[RoutedEvent]:
-        await _add_web_search(request, prepared)
-        return await _open_stream(request, prepared)
+        return await _open_answer(request, prepared)
 
     starting = asyncio.ensure_future(begin())
     await asyncio.wait({starting}, timeout=settings.hold_notice_seconds or None)

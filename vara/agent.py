@@ -95,6 +95,19 @@ class RunOptions:
     client_timezone: str | None = None
     max_steps: int | None = None
     think: bool | None = False
+    # Chat runs its messages through the agent (vara/api.py) and sets these: the chat's own system prompt
+    # and history (instead of building them from the goal), the tools this request may use (None: all),
+    # whether the run saves its answer to the conversation (chat saves the exchange itself), and a queue
+    # that receives the run's events as they happen:
+    #   ("event", RoutedEvent)        every streamed model event, from every step
+    #   ("result", action, data)      an action that succeeded, with its ActionResult data
+    #   ("error", exception)          the routing error that ended the run (privacy, no provider)
+    #   ("end", run_dict, totals)     always last
+    system: str | None = None
+    messages: list[Message] | None = None
+    tools: set[str] | None = None
+    save: bool = True
+    sink: asyncio.Queue | None = None
 
 
 class Approvals:
@@ -314,6 +327,11 @@ class AgentManager:
             self.bus.publish(event, data)
 
     def _start(self, options: RunOptions) -> tuple[list[Message], str]:
+        if options.messages is not None:
+            system = options.system
+            return list(options.messages), (
+                f"{system}\n\n{AGENT_INSTRUCTIONS}" if system else AGENT_INSTRUCTIONS
+            )
         settings = self.settings
         configured = "\n\n".join(p for p in (settings.system_prompt, settings.personality) if p)
         base = fill_clock(configured, options.client_time, options.client_timezone)
@@ -332,7 +350,13 @@ class AgentManager:
         totals = {"provider": None, "model": None, "input": None, "output": None, "cost": None}
         try:
             ctx = self._context(options)
-            tools = [a.spec() for a in self.registry.available(ctx)]
+            allowed = [
+                a
+                for a in self.registry.available(ctx)
+                if options.tools is None or a.name in options.tools
+            ]
+            names = {a.name for a in allowed}
+            tools = [a.spec() for a in allowed]
             messages, system = self._start(options)
             async with asyncio.timeout(self.settings.agent_run_timeout_seconds):
                 for step in range(1, max_steps + 1):
@@ -345,7 +369,7 @@ class AgentManager:
                         return
                     messages.append(Message("assistant", text, tool_calls=tuple(calls)))
                     for call in calls:
-                        result = await self._execute(run_id, step, call, ctx)
+                        result = await self._execute(run_id, step, call, ctx, names, options.sink)
                         messages.append(
                             Message("tool", result, tool_call_id=call.id, name=call.name)
                         )
@@ -380,6 +404,8 @@ class AgentManager:
                 status, reason = RunStatus.CANCELLED, self._cancel_reasons.pop(run_id, "Cancelled")
             self._finish(run_id, status, options, totals, error=reason)
         except ROUTING_ERRORS as exc:
+            if options.sink is not None:
+                options.sink.put_nowait(("error", exc))
             self._finish(run_id, RunStatus.FAILED, options, totals, error=str(exc))
         except Exception as exc:
             log.exception("Agent run %d failed", run_id)
@@ -409,6 +435,8 @@ class AgentManager:
             tools=tools or None,
         ):
             event = routed.event
+            if options.sink is not None:
+                options.sink.put_nowait(("event", routed))
             if isinstance(event, TextDelta):
                 parts.append(event.text)
                 self._publish(
@@ -432,9 +460,17 @@ class AgentManager:
         self._update_run(run_id, provider=totals["provider"], model=totals["model"])
         return "".join(parts).strip(), calls
 
-    async def _execute(self, run_id: int, step: int, call: ToolCall, ctx: ActionContext) -> str:
+    async def _execute(
+        self,
+        run_id: int,
+        step: int,
+        call: ToolCall,
+        ctx: ActionContext,
+        allowed: set[str],
+        sink: asyncio.Queue | None = None,
+    ) -> str:
         """Check, approve, and run one requested action. Returns what the model is told."""
-        action = self.registry.get(call.name)
+        action = self.registry.get(call.name) if call.name in allowed else None
         arguments = json.dumps(call.arguments, sort_keys=True, default=str)
         fingerprint = _fingerprint(call.name, arguments)
         with self.db.session() as session:
@@ -453,7 +489,7 @@ class AgentManager:
             record_id = record.id
         try:
             if action is None or not action.available(ctx):
-                names = ", ".join(a.name for a in self.registry.available(ctx)) or "none"
+                names = ", ".join(sorted(allowed)) or "none"
                 return self._close(
                     record_id,
                     ActionStatus.INVALID,
@@ -547,6 +583,8 @@ class AgentManager:
             text = redact(outcome.text)
             if len(text) > MAX_RESULT_CHARS:
                 text = text[:MAX_RESULT_CHARS] + "\n[cut short]"
+            if sink is not None:
+                sink.put_nowait(("result", call.name, outcome.data))
             return self._close(record_id, ActionStatus.SUCCEEDED, result=text)
         except asyncio.CancelledError:
             self._close(record_id, ActionStatus.CANCELLED, error="Cancelled", only_if_open=True)
@@ -620,12 +658,18 @@ class AgentManager:
             run.final_text = text
             run.error = error
             run.finished_at = utcnow()
-            if text and totals["provider"]:
+            if text and totals["provider"] and options.save:
                 run.conversation_id = self._save_to_conversation(session, options, text, totals)
             data = run_dict(run)
         self._cancel_reasons.pop(run_id, None)
         log.info("Agent run %d %s%s", run_id, status, f": {error}" if error else "")
         self._publish("agent_run_finished", data)
+        if options.sink is not None:
+            options.sink.put_nowait(("end", data, dict(totals)))
+
+    def link(self, run_id: int, conversation_id: int) -> None:
+        """Record the conversation a chat run's exchange was saved to (chat saves it, not the run)."""
+        self._update_run(run_id, conversation_id=conversation_id)
 
     @staticmethod
     def _save_to_conversation(

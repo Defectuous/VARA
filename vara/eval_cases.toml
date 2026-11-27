@@ -255,6 +255,42 @@ question = "What's today's date?"
 expect_all = ["{month_name}"]
 expect_regex = ['\b{day}(st|nd|rd|th)?\b']
 
+[[case]]
+id = "current-bitcoin-price"
+category = "current"
+question = "What's the price of bitcoin right now?"
+web_search = true
+expect_tools = ["market_quotes"]
+expect_regex = ['\$\s?\d{1,3}(,\d{3})+|\b\d{1,3}(,\d{3})+(\.\d+)?\s*(USD|US dollars|dollars)\b']
+reject_any = ["can't access", "cannot access", "real-time data"]
+note = "The figure must come from the quote source; any dollar figure with thousands passes."
+
+[[case]]
+id = "current-sp500-today"
+category = "current"
+question = "How is the S&P 500 doing today?"
+web_search = true
+expect_tools = ["market_quotes"]
+expect_any = ["S&P"]
+expect_regex = ['\b\d,\d{3}(\.\d+)?\b']
+
+[[case]]
+id = "current-steam-deck-price"
+category = "current"
+question = "Where can I get a Steam Deck OLED 512GB cheapest right now?"
+web_search = true
+expect_tools = ["find_prices"]
+expect_regex = ['\$\s?\d{3}']
+
+[[case]]
+id = "current-no-search-needed"
+category = "current"
+question = "How many legs does a spider have?"
+web_search = true
+reject_tools = ["web_search", "market_quotes", "find_prices"]
+expect_any = ["eight", "8"]
+note = "Search is allowed but not needed: a settled fact shouldn't send anything off the PC."
+
 # --- when "auto" reasoning should and shouldn't think --------------------------------------------
 
 [[case]]

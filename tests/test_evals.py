@@ -94,7 +94,7 @@ def test_run_grades_saves_and_compares_with_the_previous_run(tmp_path):
     seen: list = []
     replies = {
         "17*23?": {"text": "391", "reasoning": True},
-        "World Series?": {"text": "Brewers", "web_search": {"unresponsive": ["google"]}},
+        "World Series?": {"text": "Brewers", "web_search": {"unresponsive_engines": ["google"]}},
     }
     runner = evals.EvalRunner("http://vara", tmp_path, client=_fake_backend(replies, seen))
     runner.check_backend()

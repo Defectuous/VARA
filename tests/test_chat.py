@@ -36,6 +36,8 @@ def test_chat_returns_answer_and_which_model_answered() -> None:
         "price_alerts": None,
         "reasoning": False,
         "document": None,
+        "agent_run_id": 1,  # chat answers through the agent loop by default
+        "actions": [],
     }
 
 

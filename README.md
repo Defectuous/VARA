@@ -460,12 +460,23 @@ Live progress appears on `/v1/events`: `agent_run_started`, `agent_delta`, `agen
 `approval_requested`, `agent_run_finished`, and `agent_paused`. A run or approval left open when the server
 stops is closed as `interrupted` or `expired` the next time it starts.
 
-In the chat page, turn on **Tools** (top right; remembered per browser) to send messages to the agent
-instead of plain chat. Each tool V.A.R.A. uses is listed under her reply as it runs (✓ done, ⏳ waiting for
-you, ✕ declined or failed). When an action needs your approval, a card appears above the message box with
-exactly what it will do and its arguments: **Approve** or **Reject**, with an optional note. Cards appear for
-any run, including ones started from another window. **Pause agent** is the pause switch; **Stop** cancels
-the run in progress. With Tools off, chat works as before, with its own search and price-check steps.
+Chat answers through the agent loop by default (`VARA_CHAT_TOOLS=true`), so every client gets the same
+tools: the chat page, the voice listener, and anything else that calls `/v1/chat` or `/v1/chat/stream`. The
+model decides for itself when to search, look up quotes, or check prices, and each call is in the audit
+trail. The reply keeps everything chat already did: streaming, "still working on it" notices, memories,
+spoken replies, documents, and the `web_search`, `market_data`, and `deals` fields. It also gets
+`agent_run_id` and `actions` (each tool used and how it went). A request with `"web_search": false` gets no
+tools that leave the PC; `"use_memory": false` removes memory search. When the agent is paused, too many
+runs are going, or the chosen model can't use tools, chat answers without tools instead of failing.
+`"tools": false` (or `VARA_CHAT_TOOLS=false`) uses the older fixed steps: plan a search, look up quotes,
+then answer.
+
+In the chat page, **Tools** (top right; on unless you turn it off, remembered per browser) sends that
+choice with each message. Each tool V.A.R.A. uses is listed under her reply as it runs (✓ done, ⏳ waiting
+for you, ✕ declined or failed). When an action needs your approval, a card appears above the message box
+with exactly what it will do and its arguments: **Approve** or **Reject**, with an optional note. Cards
+appear for any run, including ones started from another window or by voice. **Pause agent** is the pause
+switch; **Stop** cancels the reply and its run.
 
 ## Answer-quality evals
 
@@ -476,6 +487,7 @@ uv run python -m vara eval                          # every case, for each model
 uv run python -m vara eval --model qwen3:14b        # one model (repeatable)
 uv run python -m vara eval --category logic         # one category (repeatable); --case <id> for one case
 uv run python -m vara eval --offline                # skip the cases that need live web search
+uv run python -m vara eval --tools off              # chat's fixed search steps instead of the agent's tools
 uv run python -m vara eval --list                   # show the cases
 ```
 
@@ -483,12 +495,12 @@ The cases are in `vara/eval_cases.toml`: math, logic and trick questions, code, 
 formatting instructions, saying "I don't know" instead of inventing, current events (live web search),
 whether *auto* reasoning thinks when it should, and short spoken replies. Each has an answer checked
 automatically (a number, words that must or must not appear, word counts, whether it searched or
-reasoned). Questions go through `/v1/chat` like any client, without your memories, and the test
+reasoned, which tools it used). Questions go through `/v1/chat` like any client, without your memories, and the test
 conversations are deleted afterwards (`--keep` keeps them).
 
 Each run is saved in `data/evals/runs/` with every reply, and a summary line is added to
 `data/evals/history.jsonl` with the model's Ollama digest. The next run of the same model is compared
-with it: the score change, which cases newly fail or pass, and whether the model itself was updated in
+with it (in the same `--tools` mode): the score change, which cases newly fail or pass, and whether the model itself was updated in
 between. The command exits with 1 when a model scored lower than last time. Web cases also list the
 search engines that didn't answer, since a blocked engine can fail them.
 

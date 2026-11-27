@@ -97,6 +97,10 @@ class Settings(BaseSettings):
     # needs current information (only the search words leave this PC); "off" never searches.
     web_search: Literal["auto", "off"] = "auto"
     searxng_port: int = 8890
+    # Chat answers through the agent loop (vara/agent.py), so the model calls tools itself (web search,
+    # market quotes, price checks, memory) and every call is in the audit trail. A request can turn it off
+    # with "tools": false. Off uses the older fixed steps: plan a search, look up quotes, then answer.
+    chat_tools: bool = True
 
     # Text-to-speech: Kokoro-82M voices, as in SiteRecorder/SiteReader. V.A.R.A.'s voice is bf_lily (British
     # female, the owner's choice). Others: bf_alice, bf_emma, bf_isabella; US female af_heart, af_bella, ...

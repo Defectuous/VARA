@@ -1,7 +1,7 @@
 """The built-in actions. They wrap features V.A.R.A. already has (web search, market quotes, price checks,
 memory), so the agent loop starts with tools that are already proven."""
 
-from typing import Literal
+from dataclasses import asdict
 
 from pydantic import Field
 
@@ -18,6 +18,7 @@ from vara.actions.base import (
 )
 from vara.deals import deal_context
 from vara.markets import find_symbols, market_context
+from vara.search import planner
 from vara.search.client import SearchFailed, search_context
 
 
@@ -63,19 +64,27 @@ class WebQuery(Params):
     query: str = Field(
         min_length=1, max_length=200, description="Search words, as for a search engine"
     )
-    category: Literal["general", "news"] = Field(
-        default="general", description="news for recent events and headlines"
-    )
 
 
 async def web_search(ctx: ActionContext, params: WebQuery) -> ActionResult:
+    # Not the model's choice: qwen3 picked the news engines for nearly everything recent ("Intel CEO"),
+    # and those return headlines, not answers. Like chat's fixed steps, only a query about news,
+    # headlines, or announcements searches the news engines.
+    category = planner.category_for(params.query)
     try:
-        found = await ctx.web.search(params.query, category=params.category)
+        found = await ctx.web.search(params.query, category=category)
     except SearchFailed as exc:
         raise ActionFailed(str(exc)) from exc
     return ActionResult(
         search_context(found, _retrieved(ctx)),
-        {"query": found.query, "urls": [r.url for r in found.results]},
+        {
+            "query": found.query,
+            "urls": [r.url for r in found.results],
+            "results": [
+                {"title": r.title, "url": r.url, "engines": r.engines} for r in found.results
+            ],
+            "unresponsive_engines": list(found.unresponsive),
+        },
     )
 
 
@@ -96,7 +105,14 @@ async def market_quotes(ctx: ActionContext, params: MarketQuery) -> ActionResult
     if not quotes:
         raise ActionFailed(f"No quotes found for {params.markets}")
     return ActionResult(
-        market_context(quotes, _retrieved(ctx)), {"symbols": [q.symbol for q in quotes]}
+        market_context(quotes, _retrieved(ctx)),
+        {
+            "symbols": [q.symbol for q in quotes],
+            "quotes": [
+                {"symbol": q.symbol, "name": q.name, "price": q.price, "as_of": q.as_of.isoformat()}
+                for q in quotes
+            ],
+        },
     )
 
 
@@ -108,7 +124,15 @@ class Product(Params):
 
 async def find_prices(ctx: ActionContext, params: Product) -> ActionResult:
     report = await ctx.deals.find(params.product)
-    return ActionResult(deal_context(report, _retrieved(ctx)), {"offers": len(report.offers)})
+    return ActionResult(
+        deal_context(report, _retrieved(ctx)),
+        {
+            "query": report.query,
+            "offers": [asdict(o) for o in report.offers[:8]],
+            "checked": report.checked,
+            "failed": report.failed,
+        },
+    )
 
 
 async def list_price_watches(ctx: ActionContext, _params: NoParams) -> ActionResult:

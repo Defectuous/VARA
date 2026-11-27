@@ -175,6 +175,9 @@ class FakeWeb:
 def web_client(provider, web, **settings) -> TestClient:
     router = ModelRouter([provider], PrivacyMode.LOCAL_ONLY)
     settings.setdefault("web_search", "auto")
+    # These tests cover the fixed search steps (chat without tools); tests/test_chat_tools.py covers
+    # chat through the agent loop.
+    settings.setdefault("chat_tools", False)
     return TestClient(create_app(Settings(**settings), router=router, web_search=web))
 
 

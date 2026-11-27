@@ -62,7 +62,9 @@ def run_evals(settings, args) -> int:
         print("No eval cases match.")
         return 2
 
-    runner = evals.EvalRunner(f"http://127.0.0.1:{settings.port}", settings.evals_dir)
+    runner = evals.EvalRunner(
+        f"http://127.0.0.1:{settings.port}", settings.evals_dir, tools=args.tools == "on"
+    )
     try:
         runner.check_backend()
     except RuntimeError as exc:
@@ -70,7 +72,7 @@ def run_evals(settings, args) -> int:
         return 2
     worse = False
     for model in args.model or settings.eval_model_list:
-        print(f"\n{model}: {len(cases)} cases")
+        print(f"\n{model}: {len(cases)} cases, tools {args.tools}")
         results = []
         for case in cases:
             result = runner.run_case(case, model, keep=args.keep)
@@ -130,6 +132,12 @@ def main() -> None:
     )
     evaluate.add_argument(
         "--keep", action="store_true", help="keep the test conversations in the chat history"
+    )
+    evaluate.add_argument(
+        "--tools",
+        choices=["on", "off"],
+        default="on",
+        help="answer through the agent loop with tools (on), or the fixed search steps (off)",
     )
     evaluate.add_argument("--list", action="store_true", help="list the cases and exit")
     args = parser.parse_args()

@@ -34,6 +34,8 @@ CHECKS = {
     "first_letters",  # the non-empty lines start with these letters, in order
     "no_markdown",  # no bold, headings, bullets, or code fences
     "expect_search",  # a web search did (true) or did not (false) run
+    "expect_tools",  # each of these tools was used (web_search, market_quotes, find_prices, ...)
+    "reject_tools",  # none of these tools was used
     "expect_reasoning",  # the model reasoned (true) or didn't (false) before answering
 }
 REQUEST_FIELDS = {"web_search", "reasoning", "spoken"}
@@ -63,6 +65,7 @@ class CaseResult:
     seconds: float
     reasoning: bool | None = None
     searched: bool = False
+    tools_used: list[str] = field(default_factory=list)
     unresponsive_engines: list[str] = field(default_factory=list)
     text: str = ""
     error: str | None = None
@@ -105,6 +108,7 @@ def grade(
     *,
     searched: bool = False,
     reasoning: bool | None = None,
+    tools_used: set[str] | frozenset[str] = frozenset(),
     now: datetime | None = None,
 ) -> list[str]:
     """What the reply got wrong, as readable reasons; an empty list means it passed."""
@@ -155,6 +159,12 @@ def grade(
         failures.append("uses Markdown")
     if "expect_search" in checks and searched != checks["expect_search"]:
         failures.append("didn't search the web" if checks["expect_search"] else "searched the web")
+    for name in checks.get("expect_tools", []):
+        if name not in tools_used:
+            failures.append(f"didn't use {name}")
+    for name in checks.get("reject_tools", []):
+        if name in tools_used:
+            failures.append(f"used {name}")
     if "expect_reasoning" in checks and reasoning != checks["expect_reasoning"]:
         failures.append(
             f"reasoning was {'on' if reasoning else 'off'}, "
@@ -163,10 +173,36 @@ def grade(
     return failures
 
 
+def tools_used(data: dict) -> set[str]:
+    """The tools a reply used: the agent's actions that ran, or, without tools, the fixed steps that
+    ran (they fill the same reply fields)."""
+    used = {
+        a["action"] for a in data.get("actions") or [] if a["status"] in ("succeeded", "duplicate")
+    }
+    for name, key in (
+        ("web_search", "web_search"),
+        ("market_quotes", "market_data"),
+        ("find_prices", "deals"),
+    ):
+        if data.get(key):
+            used.add(name)
+    return used
+
+
 class EvalRunner:
-    def __init__(self, base_url: str, results_dir: Path, client: httpx.Client | None = None):
+    def __init__(
+        self,
+        base_url: str,
+        results_dir: Path,
+        client: httpx.Client | None = None,
+        *,
+        tools: bool = True,
+    ):
         self.client = client or httpx.Client(base_url=base_url, timeout=900.0)
         self.results_dir = results_dir
+        # Chat through the agent loop with tools, or the fixed search steps. Runs are compared only
+        # with earlier runs in the same mode.
+        self.tools = tools
 
     def check_backend(self) -> None:
         try:
@@ -186,6 +222,7 @@ class EvalRunner:
             "web_search": False,
             "client": "vara-eval",
             "client_time": now.isoformat(),
+            "tools": self.tools,
             **case.request,
         }
         start = time.monotonic()
@@ -205,6 +242,7 @@ class EvalRunner:
         data = response.json()
         seconds = round(time.monotonic() - start, 1)
         search = data.get("web_search") or {}
+        used = tools_used(data)
         if not keep:
             # The exchange was only a test; don't leave it in the conversation history.
             self.client.delete(f"/v1/conversations/{data['conversation_id']}")
@@ -213,6 +251,7 @@ class EvalRunner:
             data["text"],
             searched=bool(search),
             reasoning=data.get("reasoning"),
+            tools_used=used,
             now=now,
         )
         return CaseResult(
@@ -223,7 +262,8 @@ class EvalRunner:
             seconds=seconds,
             reasoning=data.get("reasoning"),
             searched=bool(search),
-            unresponsive_engines=list(search.get("unresponsive") or []),
+            tools_used=sorted(used),
+            unresponsive_engines=list(search.get("unresponsive_engines") or []),
             text=data["text"],
         )
 
@@ -255,6 +295,7 @@ class EvalRunner:
             "at": at.isoformat(timespec="seconds"),
             "model": model,
             "digest": digest,
+            "tools": "on" if self.tools else "off",
             "passed": passed,
             "total": len(results),
             "score": round(100 * passed / len(results), 1) if results else 0.0,
@@ -283,7 +324,12 @@ class EvalRunner:
                 entry = json.loads(line)
             except ValueError:
                 continue
-            if entry.get("model") == model and set(entry.get("results", {})) == case_ids:
+            same_mode = entry.get("tools", "off") == ("on" if self.tools else "off")
+            if (
+                entry.get("model") == model
+                and same_mode
+                and set(entry.get("results", {})) == case_ids
+            ):
                 latest = entry
         return latest
 

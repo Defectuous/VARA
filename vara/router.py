@@ -83,6 +83,8 @@ class ModelRouter:
             (p for p in self._providers.values() if p.capabilities.tools or not needs_tools),
             key=lambda p: not p.capabilities.local,
         )
+        if needs_tools and not ordered and self._providers:
+            raise NoProviderAvailable({name: "can't use tools" for name in self._providers})
         allowed = []
         for candidate in ordered:
             try:
