@@ -110,8 +110,8 @@ class Settings(BaseSettings):
     anthropic_model: str = "claude-opus-5-5"
     anthropic_effort: str = "medium"
     # OpenAI and xAI (Grok) are used only when their key ("openai", "xai") is in the credential store.
-    openai_model: str = "gpt-5"
-    xai_model: str = "grok-4"
+    openai_model: str = "gpt-6.2-sol"
+    xai_model: str = "grok-4.7"
 
     # The agent loop (vara/agent.py): model turns per run, the time a whole run may take (including
     # waiting for approvals), how long an approval request waits for an answer before it expires, and

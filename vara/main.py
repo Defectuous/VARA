@@ -92,7 +92,7 @@ def build_router(settings: Settings) -> ModelRouter:
                 label="xAI",
                 base_url=XAI_URL,
                 default_model=settings.xai_model,
-                context_length=256_000,
+                context_length=500_000,
             )
         )
     return ModelRouter(providers, settings.privacy_mode)
