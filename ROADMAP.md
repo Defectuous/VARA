@@ -252,6 +252,16 @@ typed, approved, audited, and reversible.
     itself without the owner's review.
   - Order: detection, testing, and rollback for configuration and dependency upgrades first; code changes
     and the approval screen after that.
+- [ ] **Maybe later: learned model routing.** Not needed now: `vara/reasoning.py` already routes by rules.
+  Revisit if those rules start sending questions to the wrong model. The reference design is RouteLLM
+  (https://github.com/lm-sys/RouteLLM), which trains a classifier to choose between a strong and a weak
+  model. Use the idea, not the package:
+  - Its best routers send each prompt to OpenAI for an embedding, which breaks `local_only` mode.
+  - Its fully local `causal_llm` router is an 8B model that would compete for the V100's memory.
+  - It wants to own the model layer, which would bypass `ModelRouter`.
+  - Swapping local models takes 12 to 17 s, so the split worth learning is local versus cloud.
+  - Approach: train a small classifier on local embeddings (Phase 4) using V.A.R.A.'s own history and
+    evals. A manual model choice and the privacy mode still decide first.
 
 ## Decisions to Confirm Before Model and Device Work
 
